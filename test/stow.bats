@@ -359,3 +359,292 @@ teardown() {
     # Symlink should still exist
     [ -L "$TARGET_DIR/.bashrc" ]
 }
+
+# =============================================================================
+# stow_package — auto-unfold (fold point vs existing real directory)
+# =============================================================================
+
+@test "stow_package auto-unfolds fold point when target is a real directory" {
+    # Package has a fold point (directory)
+    mkdir -p "$PKG_DIR/.config/nvim/lua"
+    echo "init" > "$PKG_DIR/.config/nvim/init.lua"
+    echo "plugins" > "$PKG_DIR/.config/nvim/lua/plugins.lua"
+
+    # Target already has .config/nvim as a real directory (e.g. app-created files)
+    mkdir -p "$TARGET_DIR/.config/nvim"
+    echo "app data" > "$TARGET_DIR/.config/nvim/shada"
+
+    # Stow the fold point — should auto-unfold and link children
+    run stow_sh::stow_package "$PKG_DIR" "$TARGET_DIR" ".config/nvim"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"Auto-unfolding"* ]]
+
+    # init.lua should be an individual symlink (file)
+    [ -L "$TARGET_DIR/.config/nvim/init.lua" ]
+    [ "$(readlink -f "$TARGET_DIR/.config/nvim/init.lua")" = "$(readlink -f "$PKG_DIR/.config/nvim/init.lua")" ]
+
+    # lua/ should be a directory symlink (folded — doesn't exist at target)
+    [ -L "$TARGET_DIR/.config/nvim/lua" ]
+    [ "$(readlink -f "$TARGET_DIR/.config/nvim/lua")" = "$(readlink -f "$PKG_DIR/.config/nvim/lua")" ]
+    # Files inside should be accessible through the directory symlink
+    [ -e "$TARGET_DIR/.config/nvim/lua/plugins.lua" ]
+
+    # Existing app data should be untouched
+    [ -f "$TARGET_DIR/.config/nvim/shada" ]
+    [ "$(cat "$TARGET_DIR/.config/nvim/shada")" = "app data" ]
+
+    # .config/nvim should still be a real directory, not a symlink
+    [ -d "$TARGET_DIR/.config/nvim" ]
+    [ ! -L "$TARGET_DIR/.config/nvim" ]
+}
+
+@test "stow_package auto-unfold handles already-stowed files inside real directory" {
+    mkdir -p "$PKG_DIR/.config/nvim"
+    echo "init" > "$PKG_DIR/.config/nvim/init.lua"
+
+    # Target has the directory AND the file is already correctly symlinked
+    mkdir -p "$TARGET_DIR/.config/nvim"
+    ln -s "$PKG_DIR/.config/nvim/init.lua" "$TARGET_DIR/.config/nvim/init.lua"
+
+    run stow_sh::stow_package "$PKG_DIR" "$TARGET_DIR" ".config/nvim"
+    [ "$status" -eq 0 ]
+    # Should succeed without error — file already stowed
+    [ -L "$TARGET_DIR/.config/nvim/init.lua" ]
+}
+
+@test "stow_package auto-unfold --dry-run reports individual links" {
+    _stow_sh_dry_run=true
+    mkdir -p "$PKG_DIR/.config/nvim"
+    echo "init" > "$PKG_DIR/.config/nvim/init.lua"
+
+    mkdir -p "$TARGET_DIR/.config/nvim"
+    echo "app data" > "$TARGET_DIR/.config/nvim/shada"
+
+    run stow_sh::stow_package "$PKG_DIR" "$TARGET_DIR" ".config/nvim"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"Auto-unfolding"* ]]
+    [[ "$output" == *"WOULD link"* ]]
+    # No actual symlinks should be created
+    [ ! -L "$TARGET_DIR/.config/nvim/init.lua" ]
+}
+
+@test "stow_package auto-unfold errors on file conflict inside directory" {
+    mkdir -p "$PKG_DIR/.config/nvim"
+    echo "pkg init" > "$PKG_DIR/.config/nvim/init.lua"
+
+    # Target has a real file at the same path (not a symlink)
+    mkdir -p "$TARGET_DIR/.config/nvim"
+    echo "existing init" > "$TARGET_DIR/.config/nvim/init.lua"
+
+    run stow_sh::stow_package "$PKG_DIR" "$TARGET_DIR" ".config/nvim"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"Conflict"* ]]
+    # Original file should be untouched
+    [ "$(cat "$TARGET_DIR/.config/nvim/init.lua")" = "existing init" ]
+}
+
+@test "stow_package auto-unfold with --force overwrites file conflict inside directory" {
+    _stow_sh_force=true
+    mkdir -p "$PKG_DIR/.config/nvim"
+    echo "pkg init" > "$PKG_DIR/.config/nvim/init.lua"
+
+    mkdir -p "$TARGET_DIR/.config/nvim"
+    echo "existing init" > "$TARGET_DIR/.config/nvim/init.lua"
+
+    run stow_sh::stow_package "$PKG_DIR" "$TARGET_DIR" ".config/nvim"
+    [ "$status" -eq 0 ]
+    [ -L "$TARGET_DIR/.config/nvim/init.lua" ]
+    [ "$(readlink -f "$TARGET_DIR/.config/nvim/init.lua")" = "$(readlink -f "$PKG_DIR/.config/nvim/init.lua")" ]
+}
+
+@test "stow_package still errors on file conflict (non-directory) without auto-unfold" {
+    # Both source and target are files — should NOT auto-unfold
+    echo "pkg" > "$PKG_DIR/.bashrc"
+    echo "existing" > "$TARGET_DIR/.bashrc"
+
+    run stow_sh::stow_package "$PKG_DIR" "$TARGET_DIR" ".bashrc"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"Conflict"* ]]
+}
+
+# =============================================================================
+# unstow_package — auto-unfold (fold point vs existing real directory)
+# =============================================================================
+
+@test "unstow_package auto-unfolds when target is a real directory with individual links" {
+    mkdir -p "$PKG_DIR/.config/nvim/lua"
+    echo "init" > "$PKG_DIR/.config/nvim/init.lua"
+    echo "plugins" > "$PKG_DIR/.config/nvim/lua/plugins.lua"
+
+    # Target is a real directory with child symlinks (as created by auto-unfold stow):
+    # init.lua is a file symlink, lua/ is a directory symlink (folded child)
+    mkdir -p "$TARGET_DIR/.config/nvim"
+    ln -s "$PKG_DIR/.config/nvim/init.lua" "$TARGET_DIR/.config/nvim/init.lua"
+    ln -s "$PKG_DIR/.config/nvim/lua" "$TARGET_DIR/.config/nvim/lua"
+    echo "app data" > "$TARGET_DIR/.config/nvim/shada"
+
+    run stow_sh::unstow_package "$PKG_DIR" "$TARGET_DIR" ".config/nvim"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"Auto-unfolding unstow"* ]]
+
+    # Symlinks should be removed
+    [ ! -L "$TARGET_DIR/.config/nvim/init.lua" ]
+    [ ! -L "$TARGET_DIR/.config/nvim/lua" ]
+
+    # App data should be untouched
+    [ -f "$TARGET_DIR/.config/nvim/shada" ]
+    [ "$(cat "$TARGET_DIR/.config/nvim/shada")" = "app data" ]
+}
+
+@test "unstow_package auto-unfold cleans up empty subdirectories" {
+    mkdir -p "$PKG_DIR/.config/nvim/lua"
+    echo "init" > "$PKG_DIR/.config/nvim/init.lua"
+    echo "plugins" > "$PKG_DIR/.config/nvim/lua/plugins.lua"
+
+    # Target has only our symlinks (no app data) — lua is a dir symlink
+    mkdir -p "$TARGET_DIR/.config/nvim"
+    ln -s "$PKG_DIR/.config/nvim/init.lua" "$TARGET_DIR/.config/nvim/init.lua"
+    ln -s "$PKG_DIR/.config/nvim/lua" "$TARGET_DIR/.config/nvim/lua"
+
+    run stow_sh::unstow_package "$PKG_DIR" "$TARGET_DIR" ".config/nvim"
+    [ "$status" -eq 0 ]
+
+    # All symlinks should be removed
+    [ ! -L "$TARGET_DIR/.config/nvim/init.lua" ]
+    [ ! -L "$TARGET_DIR/.config/nvim/lua" ]
+    # nvim/ should be cleaned up (empty after removing symlinks)
+    [ ! -d "$TARGET_DIR/.config/nvim" ]
+}
+
+@test "unstow_package auto-unfold --dry-run reports individual unlinks" {
+    _stow_sh_dry_run=true
+    mkdir -p "$PKG_DIR/.config/nvim"
+    echo "init" > "$PKG_DIR/.config/nvim/init.lua"
+
+    mkdir -p "$TARGET_DIR/.config/nvim"
+    ln -s "$PKG_DIR/.config/nvim/init.lua" "$TARGET_DIR/.config/nvim/init.lua"
+
+    run stow_sh::unstow_package "$PKG_DIR" "$TARGET_DIR" ".config/nvim"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"Auto-unfolding unstow"* ]]
+    [[ "$output" == *"WOULD unlink"* ]]
+    # Symlink should still exist
+    [ -L "$TARGET_DIR/.config/nvim/init.lua" ]
+}
+
+# =============================================================================
+# auto-unfold — child directory folding
+# =============================================================================
+
+@test "stow_package auto-unfold folds child dirs that don't exist at target" {
+    # Package has two subdirectories inside the fold point
+    mkdir -p "$PKG_DIR/.config/opencode/agents"
+    mkdir -p "$PKG_DIR/.config/opencode/themes"
+    echo "review" > "$PKG_DIR/.config/opencode/agents/review.md"
+    echo "docs" > "$PKG_DIR/.config/opencode/agents/docs.md"
+    echo "dark" > "$PKG_DIR/.config/opencode/themes/dark.json"
+    echo "config" > "$PKG_DIR/.config/opencode/opencode.json"
+
+    # Target has .config/opencode as a real directory with app-generated files
+    mkdir -p "$TARGET_DIR/.config/opencode"
+    echo "lockfile" > "$TARGET_DIR/.config/opencode/bun.lock"
+
+    run stow_sh::stow_package "$PKG_DIR" "$TARGET_DIR" ".config/opencode"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"Auto-unfolding"* ]]
+
+    # agents/ and themes/ should be directory symlinks (folded — don't exist at target)
+    [ -L "$TARGET_DIR/.config/opencode/agents" ]
+    [ -L "$TARGET_DIR/.config/opencode/themes" ]
+    [ "$(readlink -f "$TARGET_DIR/.config/opencode/agents")" = "$(readlink -f "$PKG_DIR/.config/opencode/agents")" ]
+    [ "$(readlink -f "$TARGET_DIR/.config/opencode/themes")" = "$(readlink -f "$PKG_DIR/.config/opencode/themes")" ]
+
+    # Files inside should be accessible through directory symlinks
+    [ -e "$TARGET_DIR/.config/opencode/agents/review.md" ]
+    [ -e "$TARGET_DIR/.config/opencode/agents/docs.md" ]
+    [ -e "$TARGET_DIR/.config/opencode/themes/dark.json" ]
+
+    # opencode.json should be an individual file symlink
+    [ -L "$TARGET_DIR/.config/opencode/opencode.json" ]
+
+    # App data should be untouched
+    [ -f "$TARGET_DIR/.config/opencode/bun.lock" ]
+}
+
+@test "stow_package auto-unfold recursively unfolds child dirs that exist at target" {
+    # Package has nested structure
+    mkdir -p "$PKG_DIR/.config/opencode/agents"
+    mkdir -p "$PKG_DIR/.config/opencode/themes"
+    echo "review" > "$PKG_DIR/.config/opencode/agents/review.md"
+    echo "dark" > "$PKG_DIR/.config/opencode/themes/dark.json"
+    echo "config" > "$PKG_DIR/.config/opencode/opencode.json"
+
+    # Target has .config/opencode AND agents/ as real directories
+    mkdir -p "$TARGET_DIR/.config/opencode/agents"
+    echo "custom" > "$TARGET_DIR/.config/opencode/agents/custom.md"
+    echo "lockfile" > "$TARGET_DIR/.config/opencode/bun.lock"
+
+    run stow_sh::stow_package "$PKG_DIR" "$TARGET_DIR" ".config/opencode"
+    [ "$status" -eq 0 ]
+
+    # agents/ should remain a real directory (exists at target) — recursively auto-unfolded
+    [ -d "$TARGET_DIR/.config/opencode/agents" ]
+    [ ! -L "$TARGET_DIR/.config/opencode/agents" ]
+    [ -L "$TARGET_DIR/.config/opencode/agents/review.md" ]
+
+    # themes/ should be a directory symlink (doesn't exist at target)
+    [ -L "$TARGET_DIR/.config/opencode/themes" ]
+
+    # opencode.json is an individual file symlink
+    [ -L "$TARGET_DIR/.config/opencode/opencode.json" ]
+
+    # Existing files untouched
+    [ -f "$TARGET_DIR/.config/opencode/agents/custom.md" ]
+    [ "$(cat "$TARGET_DIR/.config/opencode/agents/custom.md")" = "custom" ]
+    [ -f "$TARGET_DIR/.config/opencode/bun.lock" ]
+}
+
+@test "stow_package auto-unfold handles dotfiles inside directory" {
+    mkdir -p "$PKG_DIR/.gnupg"
+    echo "pinentry" > "$PKG_DIR/.gnupg/gpg-agent.conf"
+    echo "hidden" > "$PKG_DIR/.gnupg/.gpg-hidden"
+
+    mkdir -p "$TARGET_DIR/.gnupg"
+    echo "secret" > "$TARGET_DIR/.gnupg/trustdb.gpg"
+
+    run stow_sh::stow_package "$PKG_DIR" "$TARGET_DIR" ".gnupg"
+    [ "$status" -eq 0 ]
+
+    # Both regular and dotfiles should be symlinked
+    [ -L "$TARGET_DIR/.gnupg/gpg-agent.conf" ]
+    [ -L "$TARGET_DIR/.gnupg/.gpg-hidden" ]
+    # Secrets untouched
+    [ -f "$TARGET_DIR/.gnupg/trustdb.gpg" ]
+}
+
+@test "unstow_package auto-unfold removes folded child dirs and file symlinks" {
+    mkdir -p "$PKG_DIR/.config/opencode/agents"
+    mkdir -p "$PKG_DIR/.config/opencode/themes"
+    echo "review" > "$PKG_DIR/.config/opencode/agents/review.md"
+    echo "dark" > "$PKG_DIR/.config/opencode/themes/dark.json"
+    echo "config" > "$PKG_DIR/.config/opencode/opencode.json"
+
+    # Set up target as auto-unfold stow would create it:
+    # agents/ and themes/ are directory symlinks, opencode.json is a file symlink
+    mkdir -p "$TARGET_DIR/.config/opencode"
+    ln -s "$PKG_DIR/.config/opencode/agents" "$TARGET_DIR/.config/opencode/agents"
+    ln -s "$PKG_DIR/.config/opencode/themes" "$TARGET_DIR/.config/opencode/themes"
+    ln -s "$PKG_DIR/.config/opencode/opencode.json" "$TARGET_DIR/.config/opencode/opencode.json"
+    echo "lockfile" > "$TARGET_DIR/.config/opencode/bun.lock"
+
+    run stow_sh::unstow_package "$PKG_DIR" "$TARGET_DIR" ".config/opencode"
+    [ "$status" -eq 0 ]
+
+    # All stow-created symlinks removed
+    [ ! -L "$TARGET_DIR/.config/opencode/agents" ]
+    [ ! -L "$TARGET_DIR/.config/opencode/themes" ]
+    [ ! -L "$TARGET_DIR/.config/opencode/opencode.json" ]
+
+    # App data untouched
+    [ -f "$TARGET_DIR/.config/opencode/bun.lock" ]
+}

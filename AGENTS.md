@@ -12,6 +12,7 @@ Version: `0.1.0` | License: MIT | Author: David Kristiansen
 - **Triple-layer filtering**: git-aware, regex (`-i`), glob (`-I`)
 - **Directory folding**: symlink whole directories when possible
 - **XDG-aware folding**: fold barriers derived from `XDG_*` environment variables
+- **Auto-unfold**: when a fold point conflicts with an existing real directory at the target, automatically falls back to creating individual file symlinks inside it
 
 ## Directory Structure
 
@@ -26,7 +27,7 @@ stow.sh/
 │   ├── filter.sh            # Path filtering engine (git / regex / glob)
 │   ├── scan.sh              # Package directory scanner (find -type f)
 │   ├── fold.sh              # Directory folding + target resolution (annotation + barrier + exclusion aware)
-│   ├── stow.sh              # Stow/unstow operations (symlink creation/removal, conflict handling)
+│   ├── stow.sh              # Stow/unstow operations (symlink creation/removal, conflict handling, auto-unfold)
 │   ├── xdg.sh               # XDG fold barrier detection from environment variables
 │   ├── conditions.sh        # Annotation parsing, condition evaluation, plugin loader
 │   └── version.sh           # Version constant: STOW_SH_VERSION="0.1.0"
@@ -116,42 +117,53 @@ Example with `XDG_CONFIG_HOME=/home/user/.config` and target `/home/user`:
 
 Annotations (`##`) affect the pipeline at two points:
 
-1. **Fold phase**: any directory with a `##`-annotated descendant is "tainted" and
-   cannot be folded. Only clean (annotation-free) subtrees are eligible for folding.
+1. **Fold phase**: an annotated directory (e.g. `dir##cond/`) CAN be a fold point
+   if all children inside it are clean (no `##` in their own names). Only ancestors
+   ABOVE the deepest annotated segment are tainted — they would expose the raw `##`
+   name if folded. A directory with a `##`-annotated child file cannot be folded.
 2. **Stow phase**: each annotated path has its conditions evaluated. Conditions on
    **directory segments propagate** to all files underneath — if a directory has
    `##no`, every file inside is skipped. If conditions pass, the symlink target
-   uses the sanitized name (annotations stripped). If conditions fail, the file
-   is skipped entirely.
+   uses the annotated name while the link name is sanitized (annotations stripped).
+   If conditions fail, the file/directory is skipped entirely.
 
 Example: `.config/mise/conf.d/20-desktop.toml##!docker`
 - Fold: `conf.d/` cannot be folded (has annotated child)
 - Stow: if not in Docker, symlink as `20-desktop.toml`; if in Docker, skip
 
 Example: `.local/lib/stow.sh##no/src/main.sh`
-- Fold: `stow.sh##no/` is tainted (has annotation), cannot fold
-- Stow: `##no` on the directory causes all files inside to be skipped
+- Fold: `stow.sh##no/` CAN fold (clean children, annotation is on directory itself)
+- Stow: `##no` condition fails → entire directory fold point is skipped as one unit
+
+Example: `.config/zsh##shell.zsh/.zshrc`
+- Fold: `zsh##shell.zsh/` CAN fold (clean children); `.config` is tainted (ancestor)
+- Stow: if shell is zsh, symlink `~/.config/zsh → .../zsh##shell.zsh`; otherwise skip
 
 ### Fold Resolution
 
-`fold_targets` receives two lists (separated by `--`): all scanned entries (pre-filter)
-and candidates (post-filter). It returns the final resolved target list:
+`fold_targets` receives a single candidate list (post-filter) and the package
+root path. It returns the final resolved target list:
 
 - **Fold points**: directories that can be symlinked as a whole (shallowest/maximal)
 - **Individual files**: files not covered by any fold point
 
 A directory is foldable only if:
-1. All its scanned descendants survived filtering (no exclusions)
-2. No descendant has a `##` annotation
+1. All entries on disk under it are accounted for in the candidate list
+   (verified via bash glob on the actual filesystem — no fork)
+2. No descendant has a `##` annotation in its own name
 3. It is not a fold barrier or ancestor of a barrier
 
+Completeness is checked bottom-up: child directories are resolved before
+parents. Symlinks inside the package directory are ignored (scan only finds
+regular files via `find -type f`).
+
 ```
-Usage: stow_sh::fold_targets [--barrier=PATH ...] pkg_root -- all1 all2 ... -- cand1 cand2 ...
+Usage: stow_sh::fold_targets [--barrier=PATH ...] pkg_root -- cand1 cand2 ...
 ```
 
 Example output with `--barrier=.config`:
 ```
-Input (all = candidates, no exclusions):
+Input candidates:
   .config/nvim/init.lua
   .config/nvim/lua/plugins.lua
   .config/mise/conf.d/00-core.toml
@@ -165,6 +177,39 @@ Output:
   .config/mise/conf.d/20-desktop.toml##!docker (individual — annotated)
   .config/mise/config.toml                    (individual — tainted parent)
   .config/nvim                                (fold point — clean subtree)
+```
+
+### Auto-Unfold
+
+When a fold point (directory) conflicts with an existing real directory at the
+target, stow automatically falls back to creating individual file symlinks
+inside the existing directory. This handles common real-world scenarios:
+
+- **`.gnupg/`**: only `gpg-agent.conf` in dotfiles, but `~/.gnupg` has private keys, keyrings
+- **`.config/opencode/`**: dotfiles have config files, but target has app-generated `node_modules/`, `bun.lock`
+- **`.config/teams-for-linux/`**: only `config.json` in dotfiles, but target has Electron app data
+
+**Stow behavior**: `__create_link` detects `source_path` is a directory AND
+`link_path` is an existing real directory (not a symlink). Instead of erroring,
+it enumerates **immediate children** of the source directory and calls
+`__create_link` for each one. Child directories that don't exist at the target
+become directory symlinks (folded); those that do exist as real directories
+trigger recursive auto-unfold. This minimizes the number of symlinks created.
+
+**Unstow behavior**: `__remove_link` detects `expected_source` is a directory AND
+`link_path` is a real directory (not a symlink). It enumerates immediate children
+of the source directory and calls `__remove_link` for each one. Directory
+symlinks are removed directly; real directories recurse. Empty directories are
+cleaned up by the existing parent-directory cleanup logic.
+
+Example with `.config/opencode` (target has `bun.lock`, `node_modules/`):
+```
+~/.config/opencode/           (real dir — auto-unfolded)
+  agents/ → pkg/agents/       (directory symlink — didn't exist at target)
+  themes/ → pkg/themes/       (directory symlink — didn't exist at target)
+  opencode.json → pkg/...     (file symlink)
+  bun.lock                    (untouched app file)
+  node_modules/               (untouched app directory)
 ```
 
 ### Module Dependency Graph
@@ -193,8 +238,7 @@ State variables use `_stow_sh_` prefix with getter functions (e.g. `stow_sh::get
 
 ### Medium
 
-1. **Per-file `git check-ignore`**: O(n) forks instead of batched `--stdin`.
-2. **Subshell getter overhead**: every `$(stow_sh::get_*)` call forks a subshell.
+1. **Subshell getter overhead**: every `$(stow_sh::get_*)` call forks a subshell.
 
 ## Development Guidelines
 
@@ -214,14 +258,14 @@ State variables use `_stow_sh_` prefix with getter functions (e.g. `stow_sh::get
 - **Framework**: [bats-core](https://github.com/bats-core/bats-core)
 - **Run tests**: `make test` or `bats --verbose-run test/`
 - **Test location**: `test/*.bats`, fixtures in `test/fixtures/`
-- **Current coverage** (192 tests, all passing):
+- **Current coverage** (222 tests, all passing):
   - `args.bats` — CLI argument parsing, short-flag expansion, path setup, getters (33)
   - `conditions.bats` — annotation parsing, path sanitization, condition evaluation, plugins, directory propagation (39)
   - `filter.bats` — git-aware, regex, glob filtering (14)
-  - `fold.bats` — directory folding with annotation taint, XDG barriers, exclusion awareness (24)
-  - `integration.bats` — end-to-end via `bin/stow.sh`: stow, unstow, restow, folding, XDG barriers, annotations, force, adopt, dry-run, ignore patterns, error cases, idempotency, self-stow, directory condition propagation (37)
+  - `fold.bats` — directory folding with annotation taint, XDG barriers, filesystem completeness, exclusion awareness (31)
+  - `integration.bats` — end-to-end via `bin/stow.sh`: stow, unstow, restow, folding, XDG barriers, annotations, force, adopt, dry-run, ignore patterns, error cases, idempotency, self-stow, directory condition propagation, auto-unfold (45)
   - `scan.bats` — recursive scanning, dotfiles, annotated filenames, spaces (8)
-  - `stow.bats` — stow/unstow operations: symlinks, annotations, conflicts, force, adopt, dry-run (27)
+  - `stow.bats` — stow/unstow operations: symlinks, annotations, conflicts, force, adopt, dry-run, auto-unfold (40)
   - `xdg.bats` — XDG barrier computation from environment variables (10)
 
 ### When Making Changes

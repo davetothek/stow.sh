@@ -96,8 +96,7 @@ stow_sh::resolve_package() {
     if ! stow_sh::is_folding_disabled; then
         stow_sh::log debug 2 "Resolving fold targets..."
         mapfile -t resolved < <(stow_sh::fold_targets \
-            "${_barrier_flags[@]}" "." \
-            -- "${relative_entries[@]}" \
+            "${_barrier_flags[@]}" "$pkg_dir" \
             -- "${filtered[@]}")
     else
         resolved=("${filtered[@]}")

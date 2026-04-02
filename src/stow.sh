@@ -15,6 +15,18 @@
 # Depends on: log.sh, args.sh (is_dry_run, is_force, is_adopt),
 #             conditions.sh (check_conditions, sanitize_path, has_annotation)
 
+# Log "Already stowed" at info level in dry-run mode so -n shows the
+# full picture, and at debug level 1 otherwise to avoid noise.
+#
+# Usage: stow_sh::__log_already_stowed "description"
+stow_sh::__log_already_stowed() {
+    if stow_sh::is_dry_run; then
+        stow_sh::log info "Already stowed: $1"
+    else
+        stow_sh::log debug 1 "Already stowed: $1"
+    fi
+}
+
 # Stow resolved targets from a package into the target directory.
 #
 # Each entry in resolved_targets is a relative path from pkg_dir. It may
@@ -126,6 +138,25 @@ stow_sh::__create_link() {
     local link_dir
     link_dir="$(dirname "$link_path")"
 
+    # Check if an ancestor directory is already a symlink pointing into the
+    # package. This happens when a previous stow created a directory symlink
+    # (fold point) but the current run resolves individual files instead
+    # (e.g. due to filter changes). The files are effectively "already stowed"
+    # through the ancestor directory symlink.
+    local _check_dir="$link_dir"
+    while [[ "$_check_dir" != "/" ]]; do
+        if [[ -L "$_check_dir" ]]; then
+            local _ancestor_target
+            _ancestor_target="$(readlink -f "$_check_dir")"
+            # Check if the ancestor symlink points into the package directory
+            if [[ "$_ancestor_target" == "$pkg_dir"* ]]; then
+                stow_sh::__log_already_stowed "'$link_path' (via directory symlink at '$_check_dir')"
+                return 0
+            fi
+        fi
+        _check_dir="$(dirname "$_check_dir")"
+    done
+
     # Check for conflicts at the link path
     if [[ -L "$link_path" ]]; then
         # It's a symlink — check where it points
@@ -135,7 +166,7 @@ stow_sh::__create_link() {
         canonical_source="$(readlink -f "$source_path")"
 
         if [[ "$existing_target" == "$canonical_source" ]]; then
-            stow_sh::log debug 1 "Already stowed: '$link_path'"
+            stow_sh::__log_already_stowed "'$link_path'"
             return 0
         fi
 
@@ -154,7 +185,32 @@ stow_sh::__create_link() {
         fi
     elif [[ -e "$link_path" ]]; then
         # Exists as a real file or directory
-        if stow_sh::is_adopt; then
+        if [[ -d "$source_path" && -d "$link_path" && ! -L "$link_path" ]]; then
+            # Auto-unfold: source is a fold point (directory) but target is
+            # already a real directory. Instead of erroring, enumerate
+            # immediate children and call __create_link for each. Child
+            # directories that don't exist at the target become directory
+            # symlinks (fold); those that do exist recurse into auto-unfold.
+            stow_sh::log info "Auto-unfolding: '$link_path' is a real directory, linking children"
+            local _unfold_had_error=false
+            local _unfold_child
+            for _unfold_child in "$source_path"/*; do
+                [[ -e "$_unfold_child" ]] || continue
+                local _name="${_unfold_child##*/}"
+                stow_sh::__create_link "$_unfold_child" "$link_path/$_name" "$pkg_dir" || _unfold_had_error=true
+            done
+            # Also handle dotfiles (hidden files/dirs)
+            for _unfold_child in "$source_path"/.*; do
+                local _name="${_unfold_child##*/}"
+                [[ "$_name" == "." || "$_name" == ".." ]] && continue
+                [[ -e "$_unfold_child" ]] || continue
+                stow_sh::__create_link "$_unfold_child" "$link_path/$_name" "$pkg_dir" || _unfold_had_error=true
+            done
+            if [[ "$_unfold_had_error" == true ]]; then
+                return 1
+            fi
+            return 0
+        elif stow_sh::is_adopt; then
             if stow_sh::is_dry_run; then
                 stow_sh::log info "WOULD adopt: '$link_path' -> '$source_path'"
                 stow_sh::log info "WOULD link: '$link_path' -> '$source_path'"
@@ -219,7 +275,36 @@ stow_sh::__remove_link() {
 
     if [[ ! -L "$link_path" ]]; then
         if [[ ! -e "$link_path" ]]; then
-            stow_sh::log debug 1 "Already unstowed (does not exist): '$link_path'"
+            if stow_sh::is_dry_run; then
+                stow_sh::log info "Already unstowed (does not exist): '$link_path'"
+            else
+                stow_sh::log debug 1 "Already unstowed (does not exist): '$link_path'"
+            fi
+            return 0
+        fi
+        # Auto-unfold inverse: expected source is a directory and the target
+        # is a real directory (previously auto-unfolded during stow). Enumerate
+        # immediate children and call __remove_link for each. Child directory
+        # symlinks are removed directly; real directories recurse.
+        if [[ -d "$expected_source" && -d "$link_path" ]]; then
+            stow_sh::log info "Auto-unfolding unstow: '$link_path' is a real directory, removing children"
+            local _unfold_had_error=false
+            local _unfold_child
+            for _unfold_child in "$expected_source"/*; do
+                [[ -e "$_unfold_child" ]] || continue
+                local _name="${_unfold_child##*/}"
+                stow_sh::__remove_link "$link_path/$_name" "$_unfold_child" "$target_dir" || _unfold_had_error=true
+            done
+            # Also handle dotfiles (hidden files/dirs)
+            for _unfold_child in "$expected_source"/.*; do
+                local _name="${_unfold_child##*/}"
+                [[ "$_name" == "." || "$_name" == ".." ]] && continue
+                [[ -e "$_unfold_child" ]] || continue
+                stow_sh::__remove_link "$link_path/$_name" "$_unfold_child" "$target_dir" || _unfold_had_error=true
+            done
+            if [[ "$_unfold_had_error" == true ]]; then
+                return 1
+            fi
             return 0
         fi
         stow_sh::log error "Cannot unstow: '$link_path' is not a symlink"

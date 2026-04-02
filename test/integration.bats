@@ -595,8 +595,61 @@ teardown() {
     run "$STOW_SH" -G --no-xdg -d "$SOURCE_DIR" -t "$TARGET_DIR" -S pkg
     [ "$status" -eq 0 ]
     [ -L "$TARGET_DIR/.bashrc" ]
-    # ls exists, so tools##exe.ls condition passes — file should be deployed
-    [ -L "$TARGET_DIR/tools/config.toml" ]
+    # ls exists, so tools##exe.ls condition passes — directory folds into
+    # a single symlink (annotated dir with clean children is a fold point)
+    [ -L "$TARGET_DIR/tools" ]
+    [ -e "$TARGET_DIR/tools/config.toml" ]
+}
+
+@test "integration: annotated directory ##no folds and skips as one unit" {
+    local pkg="$SOURCE_DIR/pkg"
+    mkdir -p "$pkg/.local/lib/stow.sh##no/src"
+    echo "main" > "$pkg/.local/lib/stow.sh##no/src/main.sh"
+    echo "fold" > "$pkg/.local/lib/stow.sh##no/src/fold.sh"
+    echo "readme" > "$pkg/.local/lib/stow.sh##no/README.md"
+    echo "bashrc" > "$pkg/.bashrc"
+
+    run "$STOW_SH" -G --no-xdg -d "$SOURCE_DIR" -t "$TARGET_DIR" -S pkg
+    [ "$status" -eq 0 ]
+    [ -L "$TARGET_DIR/.bashrc" ]
+    # stow.sh##no folds but condition fails — nothing deployed under .local/lib/stow.sh
+    [ ! -e "$TARGET_DIR/.local/lib/stow.sh" ]
+    [ ! -e "$TARGET_DIR/.local/lib/stow.sh/src/main.sh" ]
+}
+
+@test "integration: annotated directory condition passes creates directory symlink" {
+    local pkg="$SOURCE_DIR/pkg"
+    mkdir -p "$pkg/.config/zsh##exe.ls"
+    echo "zshrc" > "$pkg/.config/zsh##exe.ls/.zshrc"
+    echo "p10k" > "$pkg/.config/zsh##exe.ls/.p10k.zsh"
+    echo "bashrc" > "$pkg/.bashrc"
+
+    XDG_CONFIG_HOME="$TARGET_DIR/.config" \
+        run "$STOW_SH" -G -d "$SOURCE_DIR" -t "$TARGET_DIR" -S pkg
+    [ "$status" -eq 0 ]
+    [ -L "$TARGET_DIR/.bashrc" ]
+    # zsh##exe.ls folds into a single directory symlink (ls exists)
+    [ -L "$TARGET_DIR/.config/zsh" ]
+    [ -e "$TARGET_DIR/.config/zsh/.zshrc" ]
+    [ -e "$TARGET_DIR/.config/zsh/.p10k.zsh" ]
+    # .config must be a real dir (barrier)
+    [ -d "$TARGET_DIR/.config" ] && [ ! -L "$TARGET_DIR/.config" ]
+}
+
+@test "integration: unstow annotated directory fold point" {
+    local pkg="$SOURCE_DIR/pkg"
+    mkdir -p "$pkg/tools##exe.ls"
+    echo "config" > "$pkg/tools##exe.ls/config.toml"
+
+    # Stow first
+    run "$STOW_SH" -G --no-xdg -d "$SOURCE_DIR" -t "$TARGET_DIR" -S pkg
+    [ "$status" -eq 0 ]
+    [ -L "$TARGET_DIR/tools" ]
+
+    # Unstow
+    run "$STOW_SH" -G --no-xdg -d "$SOURCE_DIR" -t "$TARGET_DIR" -D pkg
+    [ "$status" -eq 0 ]
+    [ ! -e "$TARGET_DIR/tools" ]
 }
 
 # ============================================================
@@ -642,4 +695,135 @@ teardown() {
     # .local/bin is a barrier (must be real dir)
     [ -d "$TARGET_DIR/.local/bin" ] && [ ! -L "$TARGET_DIR/.local/bin" ]
     [ -L "$TARGET_DIR/.local/bin/mytool" ]
+}
+
+# ============================================================
+# Auto-unfold (fold point vs existing real directory)
+# ============================================================
+
+@test "integration: auto-unfold when target directory already exists" {
+    local pkg="$SOURCE_DIR/pkg"
+    mkdir -p "$pkg/.config/nvim/lua"
+    echo "init" > "$pkg/.config/nvim/init.lua"
+    echo "plugins" > "$pkg/.config/nvim/lua/plugins.lua"
+
+    # Pre-create .config/nvim as a real directory with app-generated files
+    mkdir -p "$TARGET_DIR/.config/nvim"
+    echo "app data" > "$TARGET_DIR/.config/nvim/shada"
+
+    # Stow — folding would normally create .config/nvim symlink,
+    # but auto-unfold should kick in since it's a real directory
+    XDG_CONFIG_HOME="$TARGET_DIR/.config" \
+        run "$STOW_SH" -G -d "$SOURCE_DIR" -t "$TARGET_DIR" -S pkg
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"Auto-unfolding"* ]]
+
+    # .config/nvim should remain a real directory
+    [ -d "$TARGET_DIR/.config/nvim" ] && [ ! -L "$TARGET_DIR/.config/nvim" ]
+
+    # init.lua should be an individual file symlink
+    [ -L "$TARGET_DIR/.config/nvim/init.lua" ]
+
+    # lua/ should be a directory symlink (folded child — doesn't exist at target)
+    [ -L "$TARGET_DIR/.config/nvim/lua" ]
+    [ -e "$TARGET_DIR/.config/nvim/lua/plugins.lua" ]
+
+    # App data should be untouched
+    [ -f "$TARGET_DIR/.config/nvim/shada" ]
+    [ "$(cat "$TARGET_DIR/.config/nvim/shada")" = "app data" ]
+}
+
+@test "integration: auto-unfold stow then unstow cleans up individual links" {
+    local pkg="$SOURCE_DIR/pkg"
+    mkdir -p "$pkg/.config/app/sub"
+    echo "conf1" > "$pkg/.config/app/config.toml"
+    echo "conf2" > "$pkg/.config/app/sub/extra.toml"
+
+    # Pre-create target with app-generated files
+    mkdir -p "$TARGET_DIR/.config/app"
+    echo "app state" > "$TARGET_DIR/.config/app/state.db"
+
+    # Stow (auto-unfold) — sub/ becomes a directory symlink (doesn't exist at target)
+    XDG_CONFIG_HOME="$TARGET_DIR/.config" \
+        run "$STOW_SH" -G -d "$SOURCE_DIR" -t "$TARGET_DIR" -S pkg
+    [ "$status" -eq 0 ]
+    [ -L "$TARGET_DIR/.config/app/config.toml" ]
+    [ -L "$TARGET_DIR/.config/app/sub" ]
+    [ -e "$TARGET_DIR/.config/app/sub/extra.toml" ]
+
+    # Unstow (auto-unfold inverse)
+    XDG_CONFIG_HOME="$TARGET_DIR/.config" \
+        run "$STOW_SH" -G -d "$SOURCE_DIR" -t "$TARGET_DIR" -D pkg
+    [ "$status" -eq 0 ]
+
+    # Symlinks should be removed
+    [ ! -L "$TARGET_DIR/.config/app/config.toml" ]
+    [ ! -L "$TARGET_DIR/.config/app/sub" ]
+
+    # App state should be untouched
+    [ -f "$TARGET_DIR/.config/app/state.db" ]
+    [ "$(cat "$TARGET_DIR/.config/app/state.db")" = "app state" ]
+}
+
+@test "integration: auto-unfold dry-run shows individual WOULD link messages" {
+    local pkg="$SOURCE_DIR/pkg"
+    mkdir -p "$pkg/.config/nvim"
+    echo "init" > "$pkg/.config/nvim/init.lua"
+
+    # Pre-create target directory
+    mkdir -p "$TARGET_DIR/.config/nvim"
+    echo "app data" > "$TARGET_DIR/.config/nvim/shada"
+
+    XDG_CONFIG_HOME="$TARGET_DIR/.config" \
+        run "$STOW_SH" -G -n -d "$SOURCE_DIR" -t "$TARGET_DIR" -S pkg
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"Auto-unfolding"* ]]
+    [[ "$output" == *"WOULD link"* ]]
+    # No actual symlinks
+    [ ! -L "$TARGET_DIR/.config/nvim/init.lua" ]
+}
+
+@test "integration: auto-unfold is idempotent (stow twice)" {
+    local pkg="$SOURCE_DIR/pkg"
+    mkdir -p "$pkg/.config/nvim"
+    echo "init" > "$pkg/.config/nvim/init.lua"
+
+    mkdir -p "$TARGET_DIR/.config/nvim"
+    echo "app data" > "$TARGET_DIR/.config/nvim/shada"
+
+    # Stow once
+    XDG_CONFIG_HOME="$TARGET_DIR/.config" \
+        "$STOW_SH" -G -d "$SOURCE_DIR" -t "$TARGET_DIR" -S pkg
+
+    # Stow again — should succeed (already stowed via auto-unfold)
+    XDG_CONFIG_HOME="$TARGET_DIR/.config" \
+        run "$STOW_SH" -G -d "$SOURCE_DIR" -t "$TARGET_DIR" -S pkg
+    [ "$status" -eq 0 ]
+    [ -L "$TARGET_DIR/.config/nvim/init.lua" ]
+    [ -f "$TARGET_DIR/.config/nvim/shada" ]
+}
+
+@test "integration: real-world gnupg scenario (only gpg-agent.conf in dotfiles)" {
+    local pkg="$SOURCE_DIR/pkg"
+    mkdir -p "$pkg/.gnupg"
+    echo "pinentry-program /usr/bin/pinentry-gnome3" > "$pkg/.gnupg/gpg-agent.conf"
+
+    # Simulate existing ~/.gnupg with secrets
+    mkdir -p "$TARGET_DIR/.gnupg/private-keys-v1.d"
+    echo "secret" > "$TARGET_DIR/.gnupg/trustdb.gpg"
+    echo "key" > "$TARGET_DIR/.gnupg/private-keys-v1.d/mykey.key"
+
+    run "$STOW_SH" -G --no-xdg -d "$SOURCE_DIR" -t "$TARGET_DIR" -S pkg
+    [ "$status" -eq 0 ]
+
+    # .gnupg should remain a real directory (auto-unfolded)
+    [ -d "$TARGET_DIR/.gnupg" ] && [ ! -L "$TARGET_DIR/.gnupg" ]
+
+    # gpg-agent.conf should be symlinked
+    [ -L "$TARGET_DIR/.gnupg/gpg-agent.conf" ]
+
+    # Secrets should be untouched
+    [ -f "$TARGET_DIR/.gnupg/trustdb.gpg" ]
+    [ "$(cat "$TARGET_DIR/.gnupg/trustdb.gpg")" = "secret" ]
+    [ -f "$TARGET_DIR/.gnupg/private-keys-v1.d/mykey.key" ]
 }
