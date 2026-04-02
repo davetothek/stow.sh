@@ -116,18 +116,12 @@ stow_sh::sanitize_path() {
 
 # --- Condition Evaluation ---
 
-# Evaluate all conditions on a candidate path.
-# Returns 0 if all conditions pass (file should be deployed), 1 otherwise.
-# Usage: stow_sh::check_conditions "file##os.linux,!docker"
-stow_sh::check_conditions() {
-    local candidate="$1"
-
-    if ! stow_sh::has_annotation "$candidate"; then
-        return 0
-    fi
-
-    local condition_string
-    condition_string="$(stow_sh::extract_conditions "$candidate")"
+# Evaluate a single condition string (comma-separated conditions from one ## annotation).
+# Returns 0 if all conditions pass, 1 otherwise.
+# Usage: stow_sh::__eval_condition_string "os.linux,!docker" "context_label"
+stow_sh::__eval_condition_string() {
+    local condition_string="$1"
+    local context="$2"
 
     if [[ -z "$condition_string" ]]; then
         return 0
@@ -150,7 +144,7 @@ stow_sh::check_conditions() {
         func="stow_sh::condition::${cond_type}"
 
         if ! declare -f "$func" > /dev/null 2>&1; then
-            stow_sh::log warn "Unknown condition type: '$cond_type' in '$candidate'"
+            stow_sh::log warn "Unknown condition type: '$cond_type' in '$context'"
             return 1
         fi
 
@@ -158,10 +152,38 @@ stow_sh::check_conditions() {
         local result=$?
 
         if [[ "$result" -ne "$expected" ]]; then
-            stow_sh::log debug 2 "Condition '${condition}' not met for '$candidate'"
+            stow_sh::log debug 2 "Condition '${condition}' not met for '$context'"
             return 1
         else
-            stow_sh::log debug 2 "Condition '${condition}' met for '$candidate'"
+            stow_sh::log debug 2 "Condition '${condition}' met for '$context'"
+        fi
+    done
+    return 0
+}
+
+# Evaluate all conditions on a candidate path.
+# Checks ## annotations on EVERY path segment, not just the basename.
+# If any segment's conditions fail, the entire path is skipped.
+# Returns 0 if all conditions pass (file should be deployed), 1 otherwise.
+# Usage: stow_sh::check_conditions "dir##no/file##os.linux"
+stow_sh::check_conditions() {
+    local candidate="$1"
+
+    if ! stow_sh::has_annotation "$candidate"; then
+        return 0
+    fi
+
+    # Check conditions on each path segment
+    local -a segments
+    IFS='/' read -r -a segments <<< "$candidate"
+
+    local segment
+    for segment in "${segments[@]}"; do
+        if [[ "$segment" == *"##"* ]]; then
+            local cond_str="${segment##*##}"
+            if ! stow_sh::__eval_condition_string "$cond_str" "$candidate"; then
+                return 1
+            fi
         fi
     done
     return 0

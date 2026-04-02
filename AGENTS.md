@@ -118,13 +118,19 @@ Annotations (`##`) affect the pipeline at two points:
 
 1. **Fold phase**: any directory with a `##`-annotated descendant is "tainted" and
    cannot be folded. Only clean (annotation-free) subtrees are eligible for folding.
-2. **Stow phase**: each annotated file has its conditions evaluated. If conditions
-   pass, the symlink target uses the sanitized name (annotations stripped). If
-   conditions fail, the file is skipped entirely.
+2. **Stow phase**: each annotated path has its conditions evaluated. Conditions on
+   **directory segments propagate** to all files underneath — if a directory has
+   `##no`, every file inside is skipped. If conditions pass, the symlink target
+   uses the sanitized name (annotations stripped). If conditions fail, the file
+   is skipped entirely.
 
 Example: `.config/mise/conf.d/20-desktop.toml##!docker`
 - Fold: `conf.d/` cannot be folded (has annotated child)
 - Stow: if not in Docker, symlink as `20-desktop.toml`; if in Docker, skip
+
+Example: `.local/lib/stow.sh##no/src/main.sh`
+- Fold: `stow.sh##no/` is tainted (has annotation), cannot fold
+- Stow: `##no` on the directory causes all files inside to be skipped
 
 ### Fold Resolution
 
@@ -208,12 +214,12 @@ State variables use `_stow_sh_` prefix with getter functions (e.g. `stow_sh::get
 - **Framework**: [bats-core](https://github.com/bats-core/bats-core)
 - **Run tests**: `make test` or `bats --verbose-run test/`
 - **Test location**: `test/*.bats`, fixtures in `test/fixtures/`
-- **Current coverage** (185 tests, all passing):
+- **Current coverage** (192 tests, all passing):
   - `args.bats` — CLI argument parsing, short-flag expansion, path setup, getters (33)
-  - `conditions.bats` — annotation parsing, path sanitization, condition evaluation, plugins (34)
+  - `conditions.bats` — annotation parsing, path sanitization, condition evaluation, plugins, directory propagation (39)
   - `filter.bats` — git-aware, regex, glob filtering (14)
   - `fold.bats` — directory folding with annotation taint, XDG barriers, exclusion awareness (24)
-  - `integration.bats` — end-to-end via `bin/stow.sh`: stow, unstow, restow, folding, XDG barriers, annotations, force, adopt, dry-run, ignore patterns, error cases, idempotency, self-stow (35)
+  - `integration.bats` — end-to-end via `bin/stow.sh`: stow, unstow, restow, folding, XDG barriers, annotations, force, adopt, dry-run, ignore patterns, error cases, idempotency, self-stow, directory condition propagation (37)
   - `scan.bats` — recursive scanning, dotfiles, annotated filenames, spaces (8)
   - `stow.bats` — stow/unstow operations: symlinks, annotations, conflicts, force, adopt, dry-run (27)
   - `xdg.bats` — XDG barrier computation from environment variables (10)

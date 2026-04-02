@@ -272,3 +272,31 @@ FILE
 
     rm -rf "$tmpdir"
 }
+
+# --- Directory-level condition propagation ---
+
+@test "check_conditions propagates ##no from directory segment to file" {
+    run stow_sh::check_conditions "lib##no/src/main.sh"
+    [ "$status" -eq 1 ]
+}
+
+@test "check_conditions propagates condition from parent dir to nested file" {
+    run stow_sh::check_conditions "tools##exe.nonexistent_tool_xyz/config.toml"
+    [ "$status" -eq 1 ]
+}
+
+@test "check_conditions passes when directory condition is met" {
+    run stow_sh::check_conditions "tools##exe.ls/config.toml"
+    [ "$status" -eq 0 ]
+}
+
+@test "check_conditions evaluates conditions on multiple path segments" {
+    # dir condition passes (ls exists), file condition fails (nonexistent)
+    run stow_sh::check_conditions "tools##exe.ls/config##exe.nonexistent_xyz"
+    [ "$status" -eq 1 ]
+}
+
+@test "check_conditions passes when all segment conditions pass" {
+    run stow_sh::check_conditions "tools##exe.ls/config##extension.sh"
+    [ "$status" -eq 0 ]
+}

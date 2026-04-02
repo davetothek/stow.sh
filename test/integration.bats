@@ -564,6 +564,42 @@ teardown() {
 }
 
 # ============================================================
+# Directory-level condition propagation
+# ============================================================
+
+@test "integration: ##no on directory skips all files inside" {
+    local dotfiles="$TEST_DIR/dotfiles"
+    mkdir -p "$dotfiles/.local/lib/stow.sh##no/src"
+    mkdir -p "$dotfiles/.config/nvim"
+    echo "main" > "$dotfiles/.local/lib/stow.sh##no/src/main.sh"
+    echo "readme" > "$dotfiles/.local/lib/stow.sh##no/README.md"
+    echo "init" > "$dotfiles/.config/nvim/init.lua"
+    echo "bashrc" > "$dotfiles/.bashrc"
+
+    run "$STOW_SH" -G --no-xdg -d "$dotfiles" -t "$TARGET_DIR"
+    [ "$status" -eq 0 ]
+    [ -L "$TARGET_DIR/.bashrc" ]
+    [ -L "$TARGET_DIR/.config" ]
+    # Everything under stow.sh##no should be skipped
+    [ ! -e "$TARGET_DIR/.local/lib/stow.sh/src/main.sh" ]
+    [ ! -e "$TARGET_DIR/.local/lib/stow.sh/README.md" ]
+    [ ! -e "$TARGET_DIR/.local/lib/stow.sh" ]
+}
+
+@test "integration: condition on directory passes deploys files inside" {
+    local pkg="$SOURCE_DIR/pkg"
+    mkdir -p "$pkg/tools##exe.ls"
+    echo "config" > "$pkg/tools##exe.ls/config.toml"
+    echo "bashrc" > "$pkg/.bashrc"
+
+    run "$STOW_SH" -G --no-xdg -d "$SOURCE_DIR" -t "$TARGET_DIR" -S pkg
+    [ "$status" -eq 0 ]
+    [ -L "$TARGET_DIR/.bashrc" ]
+    # ls exists, so tools##exe.ls condition passes — file should be deployed
+    [ -L "$TARGET_DIR/tools/config.toml" ]
+}
+
+# ============================================================
 # Real-world scenario: mixed package with annotations + XDG
 # ============================================================
 
