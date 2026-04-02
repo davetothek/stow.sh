@@ -2,13 +2,14 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 David Kristiansen
 
-# ======================================================
-# stow.sh — A minimal GNU Stow-like utility
-# ------------------------------------------------------
-# This is the main entrypoint script. It parses arguments,
-# sets up paths, resolves stow targets, and performs
-# stow/unstow/restow operations.
-# ======================================================
+# main.sh — orchestrator for the stow.sh pipeline
+#
+# Parses arguments, sets up paths, computes XDG fold barriers, and runs
+# each package through the scan → filter → fold → stow/unstow pipeline.
+# This is the main entrypoint script executed by bin/stow.sh.
+#
+# Depends on: version.sh, log.sh, args.sh, conditions.sh, filter.sh,
+#             scan.sh, fold.sh, xdg.sh, stow.sh
 
 set -euo pipefail
 
@@ -34,9 +35,9 @@ stow_sh::load_condition_plugins
 # Outputs resolved targets (one per line), relative to the package root.
 #
 # Usage: stow_sh::resolve_package barrier_flags_var pkg_dir
-# Args:
-#   $1 — name of an array variable holding --barrier=PATH flags
-#   $2 — absolute path to the package directory
+#   barrier_flags_var — name of an array variable holding --barrier=PATH flags
+#   pkg_dir — absolute path to the package directory
+# Output: one resolved target per line
 stow_sh::resolve_package() {
     local barrier_flags_var="$1"
     local pkg_dir
@@ -109,6 +110,7 @@ stow_sh::resolve_package() {
     done
 }
 
+# Top-level entry point: parse → setup → resolve → stow/unstow/restow.
 main() {
     stow_sh::parse_args "$@"
     stow_sh::log_setup "$(stow_sh::get_color_mode)" "$(stow_sh::get_debug)"

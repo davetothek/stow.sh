@@ -1,11 +1,21 @@
-#!/usr/bin/env bash
-shopt -s globstar extglob 2> /dev/null # Enable ** and extglob support
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 David Kristiansen
 
-# filter.sh — generic path filtering utility
+# filter.sh — triple-layer path filtering engine
+#
+# Filters candidate paths through up to three layers:
+#   1. Git-aware: consult git check-ignore (respects negation patterns)
+#   2. Regex: user-supplied -i patterns matched against relative paths
+#   3. Glob: user-supplied -I patterns matched against relative paths
+#
+# Reads paths from stdin (one per line) and writes survivors to stdout.
+#
+# Depends on: log.sh, args.sh (state variables _stow_sh_ignore,
+#             _stow_sh_ignore_glob, _stow_sh_git_mode)
 
-# Variables expected (can be initialized externally):
+shopt -s globstar extglob 2> /dev/null  # enable ** and extglob support
+
+# Guard against re-declaration when sourced after args.sh
 if ! declare -p _stow_sh_ignore 2> /dev/null | grep -q 'declare \-a'; then
     declare -a _stow_sh_ignore=()
 fi
@@ -16,6 +26,14 @@ fi
 
 : "${_stow_sh_git_mode:=false}"
 
+# Check whether a path should be ignored by git rules.
+#
+# Uses `git check-ignore --verbose` to distinguish between matched ignore
+# rules and negation patterns (lines starting with !). The .git/ directory
+# itself is always ignored.
+#
+# Usage: stow_sh::git_should_ignore relpath path
+# Returns: 0 if ignored, 1 if kept
 stow_sh::git_should_ignore() {
     local relpath="$1"
     local path="$2"
@@ -38,17 +56,21 @@ stow_sh::git_should_ignore() {
     if [[ $rc -eq 0 ]]; then
         last_line=$(tail -n1 <<< "$output")
         if [[ "$last_line" =~ ^.*:[0-9]+:!.*$ ]]; then
-            return 1  # explicitly re-included
+            return 1  # explicitly re-included via negation pattern
         else
-            return 0  # matched ignore pattern
+            return 0  # matched an ignore rule
         fi
     elif [[ $rc -eq 1 ]]; then
         return 1  # not ignored
     else
-        return 1  # unknown failure, default to keep
+        return 1  # unknown failure — default to keeping the path
     fi
 }
 
+# Check if a path matches any user-supplied regex ignore pattern (-i).
+#
+# Usage: stow_sh::match_regex_ignore path
+# Returns: 0 if matched (should ignore), 1 otherwise
 stow_sh::match_regex_ignore() {
     local path="$1"
     for pattern in "${_stow_sh_ignore[@]}"; do
@@ -57,6 +79,10 @@ stow_sh::match_regex_ignore() {
     return 1
 }
 
+# Check if a path matches any user-supplied glob ignore pattern (-I).
+#
+# Usage: stow_sh::match_glob_ignore path
+# Returns: 0 if matched (should ignore), 1 otherwise
 stow_sh::match_glob_ignore() {
     local path="$1"
     for pattern in "${_stow_sh_ignore_glob[@]}"; do
@@ -65,6 +91,11 @@ stow_sh::match_glob_ignore() {
     return 1
 }
 
+# Read candidate paths from stdin and emit only those that survive all
+# active filter layers (git, regex, glob).
+#
+# Usage: printf '%s\n' "${paths[@]}" | stow_sh::filter_candidates
+# Output: surviving paths, one per line
 stow_sh::filter_candidates() {
     local relpath="."
     if git_root=$(git rev-parse --show-toplevel 2> /dev/null); then

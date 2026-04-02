@@ -1,4 +1,3 @@
-#!/usr/bin/env bash
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 David Kristiansen
 
@@ -18,11 +17,11 @@
 
 # Stow resolved targets from a package into the target directory.
 #
-# Each entry in resolved_targets is a relative path from pkg_dir. It may be
-# a directory (fold point) or a file. Annotated entries (##) have conditions
-# evaluated and annotations stripped from the link name.
+# Each entry in resolved_targets is a relative path from pkg_dir. It may
+# be a directory (fold point) or a file. Annotated entries (##) have
+# conditions evaluated and annotations stripped from the link name.
 #
-# Usage: stow_sh::stow_package pkg_dir target_dir resolved_target1 resolved_target2 ...
+# Usage: stow_sh::stow_package pkg_dir target_dir target1 target2 ...
 # Returns: 0 on success, 1 if any target had a conflict that couldn't be resolved
 stow_sh::stow_package() {
     local pkg_dir="$1"
@@ -67,7 +66,7 @@ stow_sh::stow_package() {
 
 # Unstow resolved targets — remove symlinks that point into the package.
 #
-# Usage: stow_sh::unstow_package pkg_dir target_dir resolved_target1 resolved_target2 ...
+# Usage: stow_sh::unstow_package pkg_dir target_dir target1 target2 ...
 # Returns: 0 on success, 1 if any target had an error
 stow_sh::unstow_package() {
     local pkg_dir="$1"
@@ -105,7 +104,14 @@ stow_sh::unstow_package() {
 # --- Internal helpers ---
 
 # Create a single symlink, handling conflicts.
+#
+# Handles four cases at the link path: nothing exists (create), already
+# correct (skip), conflicting symlink (force removes it), and real
+# file/dir (adopt moves it into the package, or force removes it).
+# Symlinks are always relative, computed via realpath -m --relative-to.
+#
 # Usage: stow_sh::__create_link source_path link_path pkg_dir
+# Returns: 0 on success, 1 on unresolvable conflict
 stow_sh::__create_link() {
     local source_path="$1"
     local link_path="$2"
@@ -199,8 +205,13 @@ stow_sh::__create_link() {
 }
 
 # Remove a single symlink if it points to the expected source.
-# Cleans up empty parent directories up to target_dir.
+#
+# After removal, cleans up empty parent directories up to (but not
+# including) target_dir. Uses readlink -f to canonicalize both sides
+# so relative symlinks resolve correctly.
+#
 # Usage: stow_sh::__remove_link link_path expected_source target_dir
+# Returns: 0 on success, 1 if the link doesn't point where expected
 stow_sh::__remove_link() {
     local link_path="$1"
     local expected_source="$2"
@@ -254,7 +265,10 @@ stow_sh::__remove_link() {
     return 0
 }
 
-# Check if a directory is empty
+# Check if a directory is empty.
+#
+# Usage: _stow_sh__is_dir_empty /path/to/dir
+# Returns: 0 if empty, 1 otherwise
 _stow_sh__is_dir_empty() {
     local dir="$1"
     [[ -d "$dir" ]] && [[ -z "$(ls -A "$dir" 2>/dev/null)" ]]

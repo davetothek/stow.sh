@@ -1,5 +1,13 @@
-# Match OS name from /etc/os-release (lowercased)
-# Example: file##os.linux
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2025 David Kristiansen
+
+# os — true if the OS name from /etc/os-release matches the argument
+#
+# Reads the NAME= field from /etc/os-release, strips quotes, and
+# compares case-insensitively (both sides lowercased).
+#
+# Usage: file##os.linux, file##os.arch
+
 stow_sh::condition::os() {
     local name="$1"
     stow_sh::log debug 3 "Checking OS equals '$name'"

@@ -1,4 +1,3 @@
-#!/usr/bin/env bash
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 David Kristiansen
 
@@ -20,10 +19,13 @@
 #   2. User conditions from $XDG_CONFIG_HOME/stow.sh/conditions/*.sh
 #
 # User plugins can override built-ins by defining the same function name.
+#
+# Depends on: log.sh
 
 # --- Plugin Loading ---
 
 # Source all *.sh files from a directory.
+#
 # Usage: stow_sh::__load_conditions_from /path/to/dir
 stow_sh::__load_conditions_from() {
     local dir="$1"
@@ -43,7 +45,10 @@ stow_sh::__load_conditions_from() {
 }
 
 # Load all condition plugins: built-ins first, then user overrides.
+#
 # Call this once during startup (after log.sh is sourced).
+#
+# Usage: stow_sh::load_condition_plugins
 stow_sh::load_condition_plugins() {
     local builtin_loaded=false
 
@@ -68,14 +73,18 @@ stow_sh::load_condition_plugins() {
 
 # --- Annotation Parsing ---
 
-# Check if a path segment contains a ## annotation
+# Check if a path segment contains a ## annotation.
+#
 # Usage: stow_sh::has_annotation "file##os.linux"
+# Returns: 0 if annotated, 1 otherwise
 stow_sh::has_annotation() {
     [[ "$1" == *"##"* ]]
 }
 
-# Check if any path in a list has a ## annotation in any segment
+# Check if any path in a list has a ## annotation in any segment.
+#
 # Usage: stow_sh::any_has_annotation path1 path2 ...
+# Returns: 0 if any path is annotated, 1 otherwise
 stow_sh::any_has_annotation() {
     local path
     for path in "$@"; do
@@ -86,10 +95,12 @@ stow_sh::any_has_annotation() {
     return 1
 }
 
-# Extract the condition string from an annotated path segment
-# The LAST ## in the basename is used (handles nested dirs)
+# Extract the condition string from an annotated path segment.
+#
+# The LAST ## in the basename is used (handles nested dirs).
+#
 # Usage: stow_sh::extract_conditions "file##os.linux,shell.bash"
-#   → prints "os.linux,shell.bash"
+# Output: "os.linux,shell.bash"
 stow_sh::extract_conditions() {
     local path="$1"
     local basename="${path##*/}"
@@ -98,8 +109,10 @@ stow_sh::extract_conditions() {
     fi
 }
 
-# Strip ## annotations from a full path
-# e.g. foo##os.linux/bar##wm.sway → foo/bar
+# Strip ## annotations from every segment of a full path.
+#
+# Usage: stow_sh::sanitize_path "foo##os.linux/bar##wm.sway"
+# Output: "foo/bar"
 stow_sh::sanitize_path() {
     local path="$1"
     local sanitized=""
@@ -116,9 +129,12 @@ stow_sh::sanitize_path() {
 
 # --- Condition Evaluation ---
 
-# Evaluate a single condition string (comma-separated conditions from one ## annotation).
-# Returns 0 if all conditions pass, 1 otherwise.
+# Evaluate a single condition string (comma-separated conditions from one
+# ## annotation). Each condition is looked up as a plugin function and called.
+# Negation (!) inverts the expected result.
+#
 # Usage: stow_sh::__eval_condition_string "os.linux,!docker" "context_label"
+# Returns: 0 if all conditions pass, 1 otherwise
 stow_sh::__eval_condition_string() {
     local condition_string="$1"
     local context="$2"
@@ -162,10 +178,14 @@ stow_sh::__eval_condition_string() {
 }
 
 # Evaluate all conditions on a candidate path.
+#
 # Checks ## annotations on EVERY path segment, not just the basename.
-# If any segment's conditions fail, the entire path is skipped.
-# Returns 0 if all conditions pass (file should be deployed), 1 otherwise.
+# If any segment's conditions fail, the entire path is skipped. This
+# enables directory-level propagation: a dir##no/ causes all files
+# inside to be skipped.
+#
 # Usage: stow_sh::check_conditions "dir##no/file##os.linux"
+# Returns: 0 if all conditions pass (file should be deployed), 1 otherwise
 stow_sh::check_conditions() {
     local candidate="$1"
 

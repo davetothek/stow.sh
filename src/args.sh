@@ -1,8 +1,20 @@
-#!/usr/bin/env bash
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 David Kristiansen
 
-# Internal config state (prefixed)
+# args.sh — CLI argument parsing, path setup, and getter functions
+#
+# Parses command-line options into internal state variables, resolves
+# source and target directories, and provides getter functions so other
+# modules never access state variables directly.
+#
+# When no -S/-D/-R packages are given, auto-discovers subdirectories of
+# the source directory. If none are found, falls back to self-stow mode
+# (treating the source directory itself as the package).
+#
+# Depends on: log.sh
+
+# --- Module state ---
+
 _stow_sh_force=false
 _stow_sh_debug=0
 _stow_sh_dry_run=false
@@ -22,6 +34,10 @@ declare -a _stow_sh_stow_packages=()
 declare -a _stow_sh_unstow_targets=()
 declare -a _stow_sh_restow_targets=()
 
+# --- Getter functions ---
+# Each getter echoes the corresponding state variable so callers can
+# use command substitution: val="$(stow_sh::get_force)"
+
 stow_sh::get_force() { echo "$_stow_sh_force"; }
 stow_sh::get_debug() { echo "$_stow_sh_debug"; }
 stow_sh::get_dry_run() { echo "$_stow_sh_dry_run"; }
@@ -35,12 +51,19 @@ stow_sh::get_ignore_glob() { printf '%s\n' "${_stow_sh_ignore_glob[@]}"; }
 stow_sh::get_stow_packages() { printf '%s\n' "${_stow_sh_stow_packages[@]}"; }
 stow_sh::get_unstow_packages() { printf '%s\n' "${_stow_sh_unstow_targets[@]}"; }
 stow_sh::get_restow_packages() { printf '%s\n' "${_stow_sh_restow_targets[@]}"; }
+
+# --- Boolean predicates ---
+# Return 0 (true) or 1 (false) directly — suitable for use in if/&& chains.
+
 stow_sh::is_folding_disabled() { [[ "${_stow_sh_no_folding:-false}" == true ]]; }
 stow_sh::is_xdg_mode() { [[ "${_stow_sh_xdg_mode:-true}" == true ]]; }
 stow_sh::is_dry_run() { [[ "${_stow_sh_dry_run:-false}" == true ]]; }
 stow_sh::is_force() { [[ "${_stow_sh_force:-false}" == true ]]; }
 stow_sh::is_adopt() { [[ "${_stow_sh_adopt:-false}" == true ]]; }
 
+# Print usage information and exit.
+#
+# Usage: stow_sh::usage <exit_code>
 stow_sh::usage() {
     echo
     echo "Usage: stow.sh [OPTIONS] [<directory>]"
@@ -73,6 +96,10 @@ stow_sh::usage() {
     exit "$1"
 }
 
+# Walk up from $PWD looking for a .gitignore file.
+#
+# Usage: stow_sh::find_gitignore_upwards
+# Output: absolute path to the nearest .gitignore, or nothing if not found
 stow_sh::find_gitignore_upwards() {
     local dir="$PWD"
     while [[ "$dir" != "/" ]]; do
@@ -84,11 +111,19 @@ stow_sh::find_gitignore_upwards() {
     done
 }
 
+# Parse command-line arguments into module state.
+#
+# Handles short-flag expansion (e.g. -vvn → -v -v -n), long options,
+# multi-value flags (-S pkg1 pkg2), and auto-detection of git mode.
+# After parsing, discovers default stow packages if none were given.
+#
+# Usage: stow_sh::parse_args "$@"
 stow_sh::parse_args() {
     stow_sh::log debug 3 "parse_args() invoked with args: $*"
     local explicit_git_flag=false
 
     while [[ $# -gt 0 ]]; do
+        # Expand combined short flags: -vvn → -v -v -n
         if [[ "$1" =~ ^-[^-] && "${#1}" -gt 2 ]]; then
             expanded_short_opts=()
             for ((i = 1; i < ${#1}; i++)); do
@@ -241,7 +276,7 @@ stow_sh::parse_args() {
         esac
     done
 
-    # Git-aware mode auto detection unless overridden
+    # Auto-detect git mode when neither -g nor -G was given
     if [[ "$explicit_git_flag" == false ]]; then
         if git rev-parse --is-inside-work-tree &> /dev/null; then
             _stow_sh_git_mode=true
@@ -268,6 +303,7 @@ stow_sh::parse_args() {
         stow_sh::log debug 2 "Git-aware mode: using gitignore from $ignore_git_file"
     fi
 
+    # At most one positional argument (legacy stow root path)
     if [[ $# -gt 1 ]]; then
         stow_sh::usage 1
     elif [[ $# -eq 1 ]]; then
@@ -275,6 +311,7 @@ stow_sh::parse_args() {
         stow_sh::log debug 2 "Added positional stow target: $1"
     fi
 
+    # Auto-discover packages if none were specified via -S/-D/-R
     if [[ ${#_stow_sh_stow_packages[@]} -eq 0 && ${#_stow_sh_unstow_targets[@]} -eq 0 && ${#_stow_sh_restow_targets[@]} -eq 0 ]]; then
         local scan_root
         if [[ -z "$_stow_sh_dir" ]]; then
@@ -288,7 +325,7 @@ stow_sh::parse_args() {
             _stow_sh_stow_packages+=("$dir")
         done < <(find "$scan_root" -mindepth 1 -maxdepth 1 -type d -printf "%f\n")
 
-        # Self-stow mode: if no subdirectories found, treat source dir itself as the package
+        # Self-stow fallback: treat the source dir itself as the package
         if [[ ${#_stow_sh_stow_packages[@]} -eq 0 ]]; then
             _stow_sh_stow_packages+=(".")
             stow_sh::log debug 1 "No subdirectories found — self-stow mode (source dir is the package)"
@@ -296,6 +333,12 @@ stow_sh::parse_args() {
     fi
 }
 
+# Resolve source and target directories to absolute paths.
+#
+# If -d was not given, defaults to $PWD. If -t was not given, defaults
+# to the parent of the source directory (matching GNU Stow behavior).
+#
+# Usage: stow_sh::setup_paths
 stow_sh::setup_paths() {
     stow_sh::log debug 3 "setup_paths() with dir='$_stow_sh_dir' and target='$_stow_sh_target'"
 

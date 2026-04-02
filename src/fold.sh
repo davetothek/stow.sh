@@ -1,4 +1,3 @@
-#!/usr/bin/env bash
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 David Kristiansen
 
@@ -26,12 +25,11 @@
 # Takes two lists separated by "--": all scanned entries (pre-filter) and
 # candidates (post-filter). A directory is a fold point if ALL its scanned
 # descendants survived filtering, none have ## annotations, and it is not
-# a barrier (or ancestor of a barrier).
+# a barrier (or ancestor of a barrier). Files not covered by any fold
+# point are returned as individual entries.
 #
-# Files not covered by any fold point are returned as individual entries.
-#
-# Usage: stow_sh::fold_targets [--barrier=PATH ...] pkg_root -- all1 all2 ... -- cand1 cand2 ...
-# Output: sorted list of resolved targets (fold points + individual files, one per line)
+# Usage: stow_sh::fold_targets [--barrier=PATH ...] pkg_root -- all... -- candidates...
+# Output: one resolved target per line (fold points + individual files), sorted
 stow_sh::fold_targets() {
     # Parse --barrier flags
     local -A barrier_dirs
