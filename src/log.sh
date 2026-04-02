@@ -2,70 +2,68 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 David Kristiansen
 
-: "${debug:=0}"
-: "${color_mode:=auto}"
+_stow_sh_use_color=false
+_stow_sh_debug_level=0
 
-# Determine if we should use color
-__supports_color() {
-    [[ -t 1 ]] && tput colors &>/dev/null && [[ $(tput colors) -ge 8 ]]
+stow_sh::__supports_color() {
+    [[ -t 1 ]] && tput colors &> /dev/null && [[ $(tput colors) -ge 8 ]]
 }
 
-__use_color=false
-case "$color_mode" in
-    always) __use_color=true ;;
-    auto)   __supports_color && __use_color=true ;;
-    never)  __use_color=false ;;
-esac
+stow_sh::log_setup() {
+    local mode="${1:-auto}"
+    _stow_sh_debug_level="${2:-0}"
+    case "$mode" in
+        always) _stow_sh_use_color=true ;;
+        auto)   stow_sh::__supports_color && _stow_sh_use_color=true || true ;;
+        never)  _stow_sh_use_color=false ;;
+    esac
+}
 
 # ANSI color codes
-__c_reset="\033[0m"
-__c_debug="\033[36m"  # cyan
-__c_info="\033[32m"   # green
-__c_warn="\033[33m"   # yellow
-__c_error="\033[31m"  # red
+_stow_sh__c_reset="\033[0m"
+_stow_sh__c_debug="\033[36m"  # cyan
+_stow_sh__c_info="\033[32m"   # green
+_stow_sh__c_warn="\033[33m"   # yellow
+_stow_sh__c_error="\033[31m"  # red
 
-_log() {
+stow_sh::log() {
     local level="$1"
-    local level_debug=1
     shift
 
+    local debug=0
     if [[ "$level" == "debug" ]]; then
-        level_debug="$1"
+        debug="$1"
         shift
+        if ((debug > _stow_sh_debug_level)); then   return; fi
     fi
 
     local message="$*"
-
     local prefix=""
     local color=""
 
     case "$level" in
         debug)
-            if [[ "$debug" -lt "$level_debug" ]]; then return; fi
-            prefix="[DEBUG]"
-            color="$__c_debug"
-            ;;
+            prefix="[DEB]"
+            color="$_stow_sh__c_debug"
+        ;;
         info)
-            prefix="[INFO]"
-            color="$__c_info"
-            ;;
+            prefix="[INF]"
+            color="$_stow_sh__c_info"
+        ;;
         warn)
-            prefix="[WARN]"
-            color="$__c_warn"
-            ;;
+            prefix="[WAR]"
+            color="$_stow_sh__c_warn"
+        ;;
         error)
-            prefix="[ERROR]"
-            color="$__c_error"
-            ;;
-        *)
-            prefix="[LOG]"
-            ;;
+            prefix="[ERR]"
+            color="$_stow_sh__c_error"
+        ;;
+        *)     prefix="[LOG]" ;;
     esac
 
-    if [[ "$__use_color" == true ]]; then
-        printf "%b %s\n" "${color}${prefix}${__c_reset}" "$message" >&2
+    if [[ "$_stow_sh_use_color" == true ]]; then
+        printf "%b %s\n" "${color}${prefix}${_stow_sh__c_reset}" "$message" >&2
     else
         printf "%s %s\n" "$prefix" "$message" >&2
     fi
 }
-

@@ -1,0 +1,20 @@
+# .editorconfig for shfmt
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2025 David Kristiansen
+
+[*.sh]
+indent_style = space
+indent_size = 4
+
+# shfmt-specific settings (interpreted by tools that support .editorconfig for shfmt)
+# These may not be honored by all editors unless shfmt is explicitly configured to parse them
+insert_final_newline = true
+
+# Custom shfmt rules
+bin_op_spacing = on
+indent_switch_case = true
+keep_padding = true
+separate_continued_statements = true
+space_redirects = true
+simplify = false
+

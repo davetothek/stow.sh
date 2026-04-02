@@ -1,33 +1,19 @@
-#!/usr/bin/env bash
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 David Kristiansen
 
-# scan.sh — recursively list all candidate paths for stowing
+# scan.sh — find symlink candidates inside stow packages
 
-# Usage:
-#   __scan_tree <source_dir>
-# Output:
-#   Emits relative paths (relative to source_dir) line-by-line
+stow_sh::scan_package() {
+    local pkg_dir="$1"
 
-__scan_tree() {
-    local root="$1"
-    local cwd
+    stow_sh::log debug 2 "Scanning package directory: '$pkg_dir'"
 
-    if [[ ! -d "$root" ]]; then
-        _log error "scan root is not a directory: $root"
+    if [[ ! -d "$pkg_dir" ]]; then
+        stow_sh::log error "Package directory '$pkg_dir' not found or is not a directory"
         return 1
     fi
 
-    cwd="$(pwd)"
-    cd "$root" || return 1
-
-    # Emit all files and symlinks, including dotfiles, recursively
-    find . \( -type f -o -type l \) -print | \
-    while IFS= read -r path; do
-        # Strip leading ./
-        printf '%s\n' "${path#./}"
-    done | LC_ALL=C sort
-
-    cd "$cwd" || return 1
+    # Find all files one level down or deeper (directories are excluded;
+    # the fold phase reconstructs directory structure from file paths)
+    find "$pkg_dir" -mindepth 1 -type f -print
 }
-
