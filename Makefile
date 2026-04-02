@@ -23,9 +23,14 @@ uninstall:
 	@echo "Removing data from $(DATADIR)"
 	rm -rf "$(DATADIR)"
 
+hooks:
+	@echo "Installing git hooks..."
+	@install -m 755 hooks/* .git/hooks/
+	@echo "Done. Conventional commit format is now enforced."
+
 test:
 	@echo "Running tests..."
 	@command -v bats >/dev/null 2>&1 || { echo >&2 "ERROR: bats not found. Please install bats-core."; exit 1; }
 	@bats --verbose-run test/
 
-.PHONY: install uninstall test
+.PHONY: install uninstall hooks test
