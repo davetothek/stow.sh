@@ -716,7 +716,6 @@ teardown() {
     XDG_CONFIG_HOME="$TARGET_DIR/.config" \
         run "$STOW_SH" -G -d "$SOURCE_DIR" -t "$TARGET_DIR" -S pkg
     [ "$status" -eq 0 ]
-    [[ "$output" == *"Auto-unfolding"* ]]
 
     # .config/nvim should remain a real directory
     [ -d "$TARGET_DIR/.config/nvim" ] && [ ! -L "$TARGET_DIR/.config/nvim" ]
@@ -777,7 +776,6 @@ teardown() {
     XDG_CONFIG_HOME="$TARGET_DIR/.config" \
         run "$STOW_SH" -G -n -d "$SOURCE_DIR" -t "$TARGET_DIR" -S pkg
     [ "$status" -eq 0 ]
-    [[ "$output" == *"Auto-unfolding"* ]]
     [[ "$output" == *"WOULD link"* ]]
     # No actual symlinks
     [ ! -L "$TARGET_DIR/.config/nvim/init.lua" ]

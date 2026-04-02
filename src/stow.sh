@@ -191,7 +191,7 @@ stow_sh::__create_link() {
             # immediate children and call __create_link for each. Child
             # directories that don't exist at the target become directory
             # symlinks (fold); those that do exist recurse into auto-unfold.
-            stow_sh::log info "Auto-unfolding: '$link_path' is a real directory, linking children"
+            stow_sh::log debug 1 "Auto-unfolding: '$link_path' is a real directory, linking children"
             local _unfold_had_error=false
             local _unfold_child
             for _unfold_child in "$source_path"/*; do
@@ -287,7 +287,7 @@ stow_sh::__remove_link() {
         # immediate children and call __remove_link for each. Child directory
         # symlinks are removed directly; real directories recurse.
         if [[ -d "$expected_source" && -d "$link_path" ]]; then
-            stow_sh::log info "Auto-unfolding unstow: '$link_path' is a real directory, removing children"
+            stow_sh::log debug 1 "Auto-unfolding unstow: '$link_path' is a real directory, removing children"
             local _unfold_had_error=false
             local _unfold_child
             for _unfold_child in "$expected_source"/*; do

@@ -377,7 +377,6 @@ teardown() {
     # Stow the fold point — should auto-unfold and link children
     run stow_sh::stow_package "$PKG_DIR" "$TARGET_DIR" ".config/nvim"
     [ "$status" -eq 0 ]
-    [[ "$output" == *"Auto-unfolding"* ]]
 
     # init.lua should be an individual symlink (file)
     [ -L "$TARGET_DIR/.config/nvim/init.lua" ]
@@ -422,7 +421,6 @@ teardown() {
 
     run stow_sh::stow_package "$PKG_DIR" "$TARGET_DIR" ".config/nvim"
     [ "$status" -eq 0 ]
-    [[ "$output" == *"Auto-unfolding"* ]]
     [[ "$output" == *"WOULD link"* ]]
     # No actual symlinks should be created
     [ ! -L "$TARGET_DIR/.config/nvim/init.lua" ]
@@ -485,7 +483,6 @@ teardown() {
 
     run stow_sh::unstow_package "$PKG_DIR" "$TARGET_DIR" ".config/nvim"
     [ "$status" -eq 0 ]
-    [[ "$output" == *"Auto-unfolding unstow"* ]]
 
     # Symlinks should be removed
     [ ! -L "$TARGET_DIR/.config/nvim/init.lua" ]
@@ -526,7 +523,6 @@ teardown() {
 
     run stow_sh::unstow_package "$PKG_DIR" "$TARGET_DIR" ".config/nvim"
     [ "$status" -eq 0 ]
-    [[ "$output" == *"Auto-unfolding unstow"* ]]
     [[ "$output" == *"WOULD unlink"* ]]
     # Symlink should still exist
     [ -L "$TARGET_DIR/.config/nvim/init.lua" ]
@@ -551,7 +547,6 @@ teardown() {
 
     run stow_sh::stow_package "$PKG_DIR" "$TARGET_DIR" ".config/opencode"
     [ "$status" -eq 0 ]
-    [[ "$output" == *"Auto-unfolding"* ]]
 
     # agents/ and themes/ should be directory symlinks (folded — don't exist at target)
     [ -L "$TARGET_DIR/.config/opencode/agents" ]
