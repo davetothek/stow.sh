@@ -636,6 +636,50 @@ teardown() {
     [ -d "$TARGET_DIR/.config" ] && [ ! -L "$TARGET_DIR/.config" ]
 }
 
+@test "integration: directory ## and file ## both stripped from symlink names" {
+    local pkg="$SOURCE_DIR/pkg"
+    mkdir -p "$pkg/.config/systemd##!docker/user"
+    echo "[Unit]" > "$pkg/.config/systemd##!docker/user/gammastep@.service##exe.gammastep"
+    echo "[Unit]" > "$pkg/.config/systemd##!docker/user/kanshi.service##exe.ls"
+    echo "[Unit]" > "$pkg/.config/systemd##!docker/user/swayidle.service##wm.ls"
+
+    XDG_CONFIG_HOME="$TARGET_DIR/.config" \
+        run "$STOW_SH" -G -d "$SOURCE_DIR" -t "$TARGET_DIR" -S pkg
+    [ "$status" -eq 0 ]
+
+    # .config/systemd/user must be a real dir (unfold forced by child annotations)
+    [ -d "$TARGET_DIR/.config/systemd/user" ] && [ ! -L "$TARGET_DIR/.config/systemd/user" ]
+
+    # Symlinks should have ## stripped from BOTH directory and file names
+    [ -L "$TARGET_DIR/.config/systemd/user/gammastep@.service" ]
+    [ -L "$TARGET_DIR/.config/systemd/user/kanshi.service" ]
+    [ -L "$TARGET_DIR/.config/systemd/user/swayidle.service" ]
+
+    # The raw annotated names must NOT exist on disk
+    [ ! -e "$TARGET_DIR/.config/systemd##!docker" ]
+    [ ! -e "$TARGET_DIR/.config/systemd/user/gammastep@.service##exe.gammastep" ]
+    [ ! -e "$TARGET_DIR/.config/systemd/user/kanshi.service##exe.ls" ]
+}
+
+@test "integration: directory ## and file ## skips when file condition fails" {
+    local pkg="$SOURCE_DIR/pkg"
+    mkdir -p "$pkg/.config/systemd##!docker/user"
+    # exe.nonexistent_xyz will fail
+    echo "[Unit]" > "$pkg/.config/systemd##!docker/user/nope.service##exe.nonexistent_xyz"
+    # exe.ls will pass
+    echo "[Unit]" > "$pkg/.config/systemd##!docker/user/yes.service##exe.ls"
+
+    XDG_CONFIG_HOME="$TARGET_DIR/.config" \
+        run "$STOW_SH" -G -d "$SOURCE_DIR" -t "$TARGET_DIR" -S pkg
+    [ "$status" -eq 0 ]
+
+    # yes.service deployed (both !docker and exe.ls pass)
+    [ -L "$TARGET_DIR/.config/systemd/user/yes.service" ]
+    # nope.service skipped (exe.nonexistent_xyz fails)
+    [ ! -e "$TARGET_DIR/.config/systemd/user/nope.service" ]
+    [ ! -e "$TARGET_DIR/.config/systemd/user/nope.service##exe.nonexistent_xyz" ]
+}
+
 @test "integration: unstow annotated directory fold point" {
     local pkg="$SOURCE_DIR/pkg"
     mkdir -p "$pkg/tools##exe.ls"
