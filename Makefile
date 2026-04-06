@@ -33,4 +33,26 @@ test:
 	@command -v bats >/dev/null 2>&1 || { echo >&2 "ERROR: bats not found. Please install bats-core."; exit 1; }
 	@bats --verbose-run test/
 
-.PHONY: install uninstall hooks test
+release:
+	@command -v cz  >/dev/null 2>&1 || { echo >&2 "ERROR: commitizen (cz) not found."; exit 1; }
+	@# Ensure clean working tree
+	@if [ -n "$$(git status --porcelain)" ]; then \
+		echo >&2 "ERROR: working tree is not clean. Commit or stash changes first."; \
+		exit 1; \
+	fi
+	@# Run tests first
+	@echo "Running tests..."
+	@bats --verbose-run test/ || { echo >&2 "ERROR: tests failed. Fix before releasing."; exit 1; }
+	@# Bump version (creates commit + tag)
+	@echo ""
+	@cz bump || { echo >&2 "ERROR: cz bump failed."; exit 1; }
+	@# Update changelog
+	@cz changelog
+	@NEW_VER=$$(git tag --sort=-creatordate | head -1); \
+	git add CHANGELOG.md && git commit --amend --no-edit && \
+	git tag -d "$$NEW_VER" && git tag "$$NEW_VER" && \
+	echo "" && \
+	echo "Release $$NEW_VER ready. Push with:" && \
+	echo "  git push && git push --tags"
+
+.PHONY: install uninstall hooks test release
