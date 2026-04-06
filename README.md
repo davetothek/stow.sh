@@ -1,21 +1,21 @@
 # stow.sh
 
-A pure-Bash reimplementation of [GNU Stow](https://www.gnu.org/software/stow/) -- a symlink farm manager for dotfiles.
+[GNU Stow](https://www.gnu.org/software/stow/) rewritten in pure Bash, with extras for dotfiles management.
 
-Built for managing `~/.dotfiles` repos with features GNU Stow does not have: conditional dotfiles, git-aware filtering, XDG-aware directory folding, and auto-unfold for real-world conflicts.
+Stow manages dotfiles by creating symlinks from a source directory (your dotfiles repo) into a target directory (your home). stow.sh does the same thing, plus conditional dotfiles, git-aware filtering, per-package ignore files, and XDG-aware directory folding.
 
 ## Features
 
-- **Conditional dotfiles** via `##` annotations (e.g. `file##os.linux,shell.bash`)
-- **Git-aware filtering** using `.gitignore` rules (including negation patterns)
-- **`.stowignore` file**: per-package glob patterns to permanently exclude files and directories
-- **Quad-layer filtering**: stowignore, git-aware, regex (`-i`), glob (`-I`)
-- **User-facing reports**: clean stdout output showing what was stowed/unstowed
-- **Directory folding**: symlink whole directories when possible, minimizing link count
-- **XDG-aware folding**: fold barriers derived from `XDG_*` environment variables
-- **Auto-unfold**: when a fold point conflicts with an existing real directory, falls back to individual symlinks inside it
-- **Pluggable conditions**: ship your own predicates as shell functions
-- **Zero dependencies**: pure Bash 4+, no Python, no Ruby, no Node.js
+Everything GNU Stow does, plus:
+
+- Conditional dotfiles via `##` annotations (e.g. `file##os.linux,shell.bash`)
+- Git-aware filtering -- respects `.gitignore` rules including negation patterns
+- Per-package `.stowignore` files for excluding files from stowing
+- Regex (`-i`) and glob (`-I`) ignore patterns on the command line
+- XDG-aware directory folding -- `XDG_*` directories stay real, their children can still fold
+- Auto-unfold -- falls back to individual symlinks when a target directory already exists
+- Pluggable condition predicates as shell functions
+- Pure Bash 4+, no external dependencies
 
 ## Installation
 
@@ -82,30 +82,80 @@ This symlinks everything in `~/.dotfiles/` directly into `~/`.
 ## Usage
 
 ```
-stow.sh [OPTIONS] [<directory>]
+stow.sh — a symlink manager for dotfiles
 
-Options:
-  -d DIR, --dir=DIR             Source directory (default: current directory)
-  -t DIR, --target=DIR          Target directory (default: parent of source)
-  -S PATH, --stow PATH          Stow the specified path(s) (default: . if no args)
-  -D PATH, --delete PATH        Unstow the specified path(s) (default: . if no args)
-  -R PATH, --restow PATH        Restow the specified path(s) (default: . if no args)
-  -i REGEX, --ignore=REGEX      Ignore paths matching regex (repeatable)
-  -I GLOB, --ignore-glob=GLOB   Ignore paths matching glob (repeatable)
-  --defer=PATH                  Defer link creation for specified path (repeatable)
-  --override=PATH               Override for specified path (repeatable)
-  --adopt                       Adopt pre-existing files into stow structure
-  --no-folding                  Disable directory folding
-  --no-xdg                      Disable XDG-aware fold barriers
-  -g, --git                     Enable git-aware filtering
-  -G, --no-git                  Disable git-aware filtering
-  -f, --force                   Overwrite existing symlinks/files
-  -n, --no, --dry-run          Dry-run mode (no filesystem changes)
-  -v, --verbose                 Increase verbosity (repeatable: -vvv)
-      --verbose=N               Set verbosity level directly
-      --color=WHEN              Colorize output: never, always, auto
-  -h, --help                    Show help and exit
-      --version                 Show version and exit
+Creates symlinks from a source (dotfiles) directory into a target (home)
+directory. Supports conditional files (## annotations), directory folding,
+and git-aware filtering.
+
+Usage:
+  stow.sh [OPTIONS] [PACKAGE ...]
+  stow.sh -S PACKAGE ... [-t TARGET] [-d SOURCE]
+  stow.sh -D PACKAGE ... [-t TARGET]
+  stow.sh -R PACKAGE ... [-t TARGET] [-d SOURCE]
+
+A PACKAGE is a subdirectory of the source directory containing files to
+symlink. If no packages are given, all subdirectories of the source
+directory are stowed (or the source itself if it has no subdirectories).
+
+Actions:
+  -S, --stow PACKAGE ...    Create symlinks for the given package(s)
+  -D, --delete PACKAGE ...  Remove symlinks for the given package(s)
+  -R, --restow PACKAGE ...  Remove then re-create symlinks (useful after
+                            updating dotfiles)
+
+Directories:
+  -d, --dir DIR             Source directory where packages live
+                            (default: current directory)
+  -t, --target DIR          Target directory for symlinks
+                            (default: parent of source directory)
+
+Filtering:
+  -g, --git                 Use .gitignore rules to skip ignored files
+  -G, --no-git              Disable git-aware filtering
+                            (default: auto-detect based on git repo)
+  -i, --ignore REGEX ...    Skip files matching regex pattern(s)
+  -I, --ignore-glob GLOB ...
+                            Skip files matching glob pattern(s)
+
+  A .stowignore file in a package directory can list glob patterns
+  (one per line) to permanently exclude files. The .stowignore file
+  itself is always excluded. Lines starting with # are comments.
+
+Folding:
+  --no-folding              Symlink each file individually instead of
+                            symlinking entire directories when possible
+  --no-xdg                  Don't treat XDG directories (e.g. ~/.config)
+                            as fold barriers
+
+Conflict handling:
+  -f, --force               Overwrite existing symlinks at the target
+  --adopt                   Move existing target files into the source
+                            package, then create the symlink
+  --defer=REGEX             Skip if a symlink from another package
+                            already exists at the target (repeatable)
+  --override=REGEX          Replace symlinks from other packages that
+                            match the pattern (repeatable)
+
+Output:
+  -v, --verbose             Show more detail (repeat for more: -vvv)
+      --verbose=N           Set verbosity to level N directly
+      --color=WHEN          Color output: auto, always, never (default: auto)
+  -n, --no, --dry-run       Show what would be done without making changes
+
+Info:
+  -h, --help                Show this help
+      --version             Show version
+
+Examples:
+  stow.sh                   Stow all packages from . into ..
+  stow.sh vim bash          Stow only the vim and bash packages
+  stow.sh -t ~ -d ~/dotfiles -S vim
+                            Stow vim from ~/dotfiles into ~
+  stow.sh -D vim            Remove symlinks created by the vim package
+  stow.sh -R vim            Re-stow vim (unstow + stow)
+  stow.sh -n -vv            Dry-run with verbose output — see what
+                            would happen without changing anything
 ```
 
 ### Git-aware filtering
@@ -245,16 +295,7 @@ Disable with `--no-xdg`.
 
 ### Auto-unfold
 
-When a fold point conflicts with an existing real directory at the target (e.g. `~/.gnupg` already has private keys), stow.sh automatically falls back to individual symlinks inside that directory.
-
-Child directories that don't exist at the target become directory symlinks (folded). Those that already exist as real directories trigger recursive auto-unfold.
-
-```
-~/.gnupg/                     # real directory (has private keys, keyrings)
-  gpg-agent.conf -> dotfiles  # individual symlink (auto-unfolded)
-  pubring.kbx                 # untouched (not in dotfiles)
-  private-keys-v1.d/          # untouched (not in dotfiles)
-```
+When a fold point conflicts with an existing real directory at the target (e.g. `~/.gnupg` already has private keys), stow.sh falls back to creating individual symlinks inside it instead of reporting a conflict. Child directories that don't exist at the target are still folded into single symlinks.
 
 ## Development
 
@@ -308,5 +349,5 @@ MIT
 
 ## Acknowledgements
 
-- [GNU Stow](https://www.gnu.org/software/stow/) -- the original symlink farm manager that inspired this project's core design and CLI interface.
+- [GNU Stow](https://www.gnu.org/software/stow/) -- the original dotfiles symlink manager that inspired this project's core design and CLI interface.
 - [yadm](https://yadm.io/) -- its conditional file handling (`##` annotations) was the direct inspiration for stow.sh's conditional dotfiles system.

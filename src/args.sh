@@ -65,9 +65,9 @@ stow_sh::is_adopt() { [[ "${_stow_sh_adopt:-false}" == true ]]; }
 #
 # Usage: stow_sh::usage <exit_code>
 stow_sh::usage() {
-    cat <<'HELPEOF'
+    cat <<HELPEOF
 
-stow.sh — a symlink farm manager for dotfiles
+stow.sh — a symlink manager for dotfiles
 
 Creates symlinks from a source (dotfiles) directory into a target (home)
 directory. Supports conditional files (## annotations), directory folding,
@@ -141,6 +141,8 @@ Examples:
   stow.sh -R vim            Re-stow vim (unstow + stow)
   stow.sh -n -vv            Dry-run with verbose output — see what
                             would happen without changing anything
+
+stow.sh version $STOW_SH_VERSION
 HELPEOF
     exit "$1"
 }
