@@ -151,21 +151,6 @@ HELPEOF
     exit "$1"
 }
 
-# Walk up from $PWD looking for a .gitignore file.
-#
-# Usage: stow_sh::find_gitignore_upwards
-# Output: absolute path to the nearest .gitignore, or nothing if not found
-stow_sh::find_gitignore_upwards() {
-    local dir="$PWD"
-    while [[ "$dir" != "/" ]]; do
-        if [[ -f "$dir/.gitignore" ]]; then
-            echo "$dir/.gitignore"
-            return
-        fi
-        dir="$(dirname "$dir")"
-    done
-}
-
 # Parse command-line arguments into module state.
 #
 # Handles short-flag expansion (e.g. -vvn → -v -v -n), long options,
@@ -349,19 +334,11 @@ stow_sh::parse_args() {
     fi
 
     if [[ "$_stow_sh_git_mode" == true ]]; then
-        if ! git_root=$(git rev-parse --show-toplevel 2> /dev/null); then
+        if ! git rev-parse --show-toplevel &> /dev/null; then
             stow_sh::log error "Cannot enable --git: not inside a git repository"
             exit 1
         fi
-
-        expected_gitignore="$git_root/.gitignore"
-        if [[ ! -f "$expected_gitignore" ]]; then
-            stow_sh::log error "No .gitignore found at git repo root: $expected_gitignore"
-            exit 1
-        fi
-
-        ignore_git_file="$expected_gitignore"
-        stow_sh::log debug 2 "Git-aware mode: using gitignore from $ignore_git_file"
+        stow_sh::log debug 2 "Git-aware mode enabled"
     fi
 
     # At most one positional argument (legacy stow root path)
