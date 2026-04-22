@@ -1,31 +1,65 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 David Kristiansen
 
-PREFIX ?= $(if $(XDG_BIN_HOME),$(XDG_BIN_HOME),$(HOME)/.local/bin)
-BINDIR := $(PREFIX)
-DATADIR ?= $(if $(XDG_DATA_HOME),$(XDG_DATA_HOME),$(HOME)/.local/share)/stow.sh
-TARGET := bin/stow.sh
-LINK := stow.sh
+INSTALL ?= install
+RM      ?= rm -f
+RMDIR   ?= rm -rf
+
+PROJECT  := stow.sh
+BIN_NAME := stow.sh
+
+UID := $(shell id -u)
+
+# Non-standard convenience override (XDG does not define XDG_BIN_HOME)
+XDG_BIN_HOME ?=
+
+ifeq ($(UID),0)
+  PREFIX ?= /usr/local
+else
+  PREFIX ?= $(HOME)/.local
+endif
+
+ifneq ($(strip $(XDG_BIN_HOME)),)
+  bindir ?= $(XDG_BIN_HOME)
+else
+  bindir ?= $(PREFIX)/bin
+endif
+
+datadir ?= $(PREFIX)/share/$(PROJECT)
+
+DESTDIR ?=
+
+BINDIR  := $(DESTDIR)$(bindir)
+DATADIR := $(DESTDIR)$(datadir)
+
+.PHONY: all install uninstall hooks test release print-vars
+
+all:
+	@echo "Nothing to build for $(PROJECT) (pure shell)."
 
 install:
-	@echo "Installing $(LINK) to $(BINDIR)"
-	install -d "$(BINDIR)"
-	chmod +x $(TARGET)
-	ln -sf "$(abspath $(TARGET))" "$(BINDIR)/$(LINK)"
-	@echo "Installing built-in conditions to $(DATADIR)/conditions.d"
-	install -d "$(DATADIR)/conditions.d"
-	install -m 644 conditions.d/*.sh "$(DATADIR)/conditions.d/"
-	@echo "Done. Make sure '$(BINDIR)' is in your PATH."
+	@echo "Installing $(PROJECT)"
+	@echo "  bindir : $(BINDIR)"
+	@echo "  datadir: $(DATADIR)"
+	$(INSTALL) -d "$(BINDIR)"
+	$(INSTALL) -d "$(DATADIR)/src"
+	$(INSTALL) -d "$(DATADIR)/conditions.d"
+	$(INSTALL) -m 755 src/main.sh "$(DATADIR)/src/"
+	$(INSTALL) -m 644 $(filter-out src/main.sh,$(wildcard src/*.sh)) "$(DATADIR)/src/"
+	$(INSTALL) -m 644 conditions.d/*.sh "$(DATADIR)/conditions.d/"
+	@printf '#!/usr/bin/env bash\nexport STOW_ROOT="%s"\nexec "$$STOW_ROOT/src/main.sh" "$$@"\n' "$(datadir)" > "$(BINDIR)/$(BIN_NAME)"
+	chmod 755 "$(BINDIR)/$(BIN_NAME)"
+	@echo "Install complete."
 
 uninstall:
-	@echo "Removing $(LINK) from $(BINDIR)"
-	rm -f "$(BINDIR)/$(LINK)"
-	@echo "Removing data from $(DATADIR)"
-	rm -rf "$(DATADIR)"
+	@echo "Uninstalling $(PROJECT)"
+	$(RM) "$(BINDIR)/$(BIN_NAME)"
+	$(RMDIR) "$(DATADIR)"
+	@echo "Uninstall complete."
 
 hooks:
 	@echo "Installing git hooks..."
-	@install -m 755 hooks/* .git/hooks/
+	@$(INSTALL) -m 755 hooks/* .git/hooks/
 	@echo "Done. Conventional commit format is now enforced."
 
 test:
@@ -57,4 +91,12 @@ release:
 	echo "Release $$NEW_VER ready. Push with:" && \
 	echo "  git push && git push --tags"
 
-.PHONY: install uninstall hooks test release
+print-vars:
+	@echo "UID          = $(UID)"
+	@echo "PREFIX       = $(PREFIX)"
+	@echo "XDG_BIN_HOME = $(XDG_BIN_HOME)"
+	@echo "bindir       = $(bindir)"
+	@echo "datadir      = $(datadir)"
+	@echo "DESTDIR      = $(DESTDIR)"
+	@echo "BINDIR       = $(BINDIR)"
+	@echo "DATADIR      = $(DATADIR)"
