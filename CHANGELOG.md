@@ -1,3 +1,9 @@
+## v0.11.1 (2026-04-22)
+
+### Fix
+
+- **ci**: configure git identity and remove environment-dependent test conditions
+
 ## v0.11.0 (2026-04-22)
 
 ### Fix

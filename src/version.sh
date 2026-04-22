@@ -6,4 +6,4 @@
 # Single source of truth for the stow.sh version string.
 # No dependencies.
 
-STOW_SH_VERSION="0.11.0"
+STOW_SH_VERSION="0.11.1"
