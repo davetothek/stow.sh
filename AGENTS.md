@@ -3,7 +3,7 @@
 ## Project Overview
 
 **stow.sh** is a pure-Bash reimplementation of GNU Stow — a symlink farm manager for dotfiles.
-Version: `0.10.0` | License: MIT | Author: David Kristiansen
+Version: `0.11.0` | License: MIT | Author: David Kristiansen
 
 ### Key features beyond GNU Stow
 
@@ -35,8 +35,10 @@ stow.sh/
 │   └── version.sh           # Version constant: STOW_SH_VERSION="0.9.1"
 ├── conditions.d/             # Built-in condition predicates (loaded as plugins)
 │   ├── docker.sh            #   docker — /.dockerenv check
+│   ├── desktop.sh           #   desktop — no battery (stationary machine)
 │   ├── exe.sh               #   exe.<name> — executable in $PATH
 │   ├── extension.sh         #   extension — always true (preserve file extensions)
+│   ├── laptop.sh            #   laptop — has battery (portable machine)
 │   ├── no.sh                #   no — always false (never deploy)
 │   ├── os.sh                #   os.<name> — /etc/os-release match
 │   ├── shell.sh             #   shell.<name> — $SHELL basename match
@@ -55,7 +57,11 @@ stow.sh/
 │   ├── xdg.bats             # Tests for xdg.sh: XDG barrier computation (10 tests)
 │   └── fixtures/
 │       └── paths.bats       # Fixture: realistic dotfile path list (unused)
-├── Makefile                  # install / uninstall / hooks / test targets
+├── Makefile                  # install / uninstall / hooks / test / release targets
+├── CONTRIBUTING.md           # Development setup, architecture, commit conventions
+├── .github/
+│   └── workflows/
+│       └── release.yml       # CI: test + tarball + GitHub Release on tag push
 ├── .editorconfig             # shfmt formatting rules (4-space indent)
 ├── .gitignore                # Ignores SHOULD_BE_IGNORED/
 └── SHOULD_BE_IGNORED/        # Test artifact for git-aware filtering validation

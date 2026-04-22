@@ -6,19 +6,6 @@
 
 Stow manages dotfiles by creating symlinks from a source directory (your dotfiles repo) into a target directory (your home). stow.sh does the same thing, plus conditional dotfiles, git-aware filtering, per-package ignore files, and XDG-aware directory folding.
 
-## Table of Contents
-
-- [Features](#features)
-- [Installation](#installation)
-- [Quick Start](#quick-start)
-- [Usage](#usage)
-- [Conditional Dotfiles](#conditional-dotfiles)
-- [Custom Conditions](#custom-conditions)
-- [Directory Folding](#directory-folding)
-- [Development](#development)
-- [License](#license)
-- [Acknowledgements](#acknowledgements)
-
 ## Features
 
 Everything GNU Stow does, plus:
@@ -34,7 +21,13 @@ Everything GNU Stow does, plus:
 
 ## Installation
 
-### From source (recommended)
+### With mise
+
+```bash
+mise use -g "github:davidKristiansen/stow.sh"
+```
+
+### From source
 
 ```bash
 git clone https://github.com/davidKristiansen/stow.sh.git
@@ -42,28 +35,20 @@ cd stow.sh
 make install
 ```
 
-This symlinks `stow.sh` into `$XDG_BIN_HOME` (or `~/.local/bin`) and copies built-in condition plugins to `$XDG_DATA_HOME/stow.sh/conditions.d/`.
-
-### As a git submodule
-
-Useful when you want stow.sh tracked inside your dotfiles repo:
-
-```bash
-cd ~/.dotfiles
-git submodule add https://github.com/davidKristiansen/stow.sh.git .local/lib/stow.sh
-make -C .local/lib/stow.sh install
-```
+Installs to `~/.local` for regular users, `/usr/local` for root. Override with `PREFIX=`.
 
 ### Uninstall
 
 ```bash
 make uninstall
+# or
+mise rm "github:davidKristiansen/stow.sh"
 ```
 
 ## Quick Start
 
 ```bash
-# Stow all packages (subdirectories) from current dir into parent dir
+# Stow all packages from current dir into parent dir
 cd ~/.dotfiles
 stow.sh
 
@@ -85,171 +70,119 @@ stow.sh -f
 
 ### Self-stow mode
 
-When the source directory has no subdirectories (or none are specified), stow.sh treats the source directory itself as the package. This is the typical setup for a flat dotfiles repo:
+When the source directory has no subdirectories (or none are specified), stow.sh treats the source directory itself as the package:
 
 ```bash
 cd ~/.dotfiles
-stow.sh
+stow.sh    # symlinks everything into ~/
 ```
-
-This symlinks everything in `~/.dotfiles/` directly into `~/` (the parent of the source directory is the default target).
 
 ## Usage
 
 ```
-stow.sh — a symlink manager for dotfiles
-
-Creates symlinks from a source (dotfiles) directory into a target (home)
-directory. Supports conditional files (## annotations), directory folding,
-and git-aware filtering.
-
 Usage:
   stow.sh [OPTIONS] [PACKAGE ...]
   stow.sh -S PACKAGE ... [-t TARGET] [-d SOURCE]
   stow.sh -D PACKAGE ... [-t TARGET]
   stow.sh -R PACKAGE ... [-t TARGET] [-d SOURCE]
 
-A PACKAGE is a subdirectory of the source directory containing files to
-symlink. If no packages are given, all subdirectories of the source
-directory are stowed (or the source itself if it has no subdirectories).
-
 Actions:
   -S, --stow PACKAGE ...    Create symlinks for the given package(s)
   -D, --delete PACKAGE ...  Remove symlinks for the given package(s)
-  -R, --restow PACKAGE ...  Remove then re-create symlinks (useful after
-                            updating dotfiles)
+  -R, --restow PACKAGE ...  Remove then re-create symlinks
 
 Directories:
-  -d, --dir DIR             Source directory where packages live
-                            (default: current directory)
-  -t, --target DIR          Target directory for symlinks
-                            (default: parent of source directory)
+  -d, --dir DIR             Source directory (default: current directory)
+  -t, --target DIR          Target directory (default: parent of source)
 
 Filtering:
   -g, --git                 Use .gitignore rules to skip ignored files
   -G, --no-git              Disable git-aware filtering
-                            (default: auto-detect based on git repo)
   -i, --ignore REGEX ...    Skip files matching regex pattern(s)
-  -I, --ignore-glob GLOB ...
-                            Skip files matching glob pattern(s)
-
-  A .stowignore file in a package directory can list glob patterns
-  (one per line) to permanently exclude files. The .stowignore file
-  itself is always excluded. Lines starting with # are comments.
-
-  Files can be annotated with ## conditions (e.g. file##os.linux).
-  Custom conditions can be added as shell scripts in
-  $XDG_CONFIG_HOME/stow.sh/conditions/ (see README for details).
+  -I, --ignore-glob GLOB ...  Skip files matching glob pattern(s)
 
 Folding:
-  --no-folding              Symlink each file individually instead of
-                            symlinking entire directories when possible
-  --no-xdg                  Don't treat XDG directories (e.g. ~/.config)
-                            as fold barriers
+  --no-folding              Symlink each file individually
+  --no-xdg                  Don't treat XDG directories as fold barriers
 
 Conflict handling:
   -f, --force               Overwrite existing symlinks at the target
-  --adopt                   Move existing target files into the source
-                            package, then create the symlink
-  --defer=REGEX             Skip if a symlink from another package
-                            already exists at the target (repeatable)
-  --override=REGEX          Replace symlinks from other packages that
-                            match the pattern (repeatable)
+  --adopt                   Move existing target files into the package
+  --defer=REGEX             Skip if a symlink already exists at the target
+  --override=REGEX          Replace symlinks from other packages
 
 Output:
-  -v, --verbose             Show more detail (repeat for more: -vvv)
-      --verbose=N           Set verbosity to level N directly
-      --color=WHEN          Color output: auto, always, never (default: auto)
-  -n, --no, --dry-run       Show what would be done without making changes
-
-Info:
-  -h, --help                Show this help
-      --version             Show version
-
-Examples:
-  stow.sh                   Stow all packages from . into ..
-  stow.sh vim bash          Stow only the vim and bash packages
-  stow.sh -t ~ -d ~/dotfiles -S vim
-                            Stow vim from ~/dotfiles into ~
-  stow.sh -D vim            Remove symlinks created by the vim package
-  stow.sh -R vim            Re-stow vim (unstow + stow)
-  stow.sh -n -vv            Dry-run with verbose output — see what
-                            would happen without changing anything
+  -v, --verbose             Show more detail (repeat: -vvv)
+  -n, --no, --dry-run       Preview without making changes
+  --color=WHEN              auto, always, never (default: auto)
+  -h, --help                Show help
+  --version                 Show version
 ```
-
-### Git-aware filtering
-
-When run inside a git repository (auto-detected), stow.sh respects `.gitignore` rules. Files ignored by git are excluded from stowing. This includes negation patterns (`!important.txt`).
-
-Disable with `-G` or `--no-git`. Force enable with `-g`.
 
 ### Filtering priority
 
 Filters are applied in order:
 
-1. **Stowignore** -- excludes files matching `.stowignore` patterns (always active)
-2. **Git-aware** -- excludes files matching `.gitignore` (if enabled)
-3. **Regex** (`-i`) -- excludes files matching any regex pattern
-4. **Glob** (`-I`) -- excludes files matching any glob pattern
+1. **Stowignore** -- `.stowignore` patterns (always active)
+2. **Git-aware** -- `.gitignore` rules (if enabled)
+3. **Regex** (`-i`) -- regex patterns
+4. **Glob** (`-I`) -- glob patterns
 
 ### .stowignore
 
-A `.stowignore` file in a package directory lists glob patterns (one per line) to permanently exclude files and directories from stowing. The `.stowignore` file itself is always excluded.
+A `.stowignore` file in a package directory lists glob patterns (one per line) to permanently exclude files and directories. The `.stowignore` file itself is always excluded.
 
 ```
-# .stowignore — project management files, not dotfiles
+# .stowignore
 AGENTS.md
 .github
-.gitignore
-.gitmodules
 *.baseline
 bootstrap
 ```
 
-Patterns match against the full relative path, the basename, and every ancestor directory segment. A pattern like `.github` excludes `.github/CODEOWNERS`, `.github/workflows/ci.yml`, etc.
-
-Lines starting with `#` are comments. Blank lines are ignored.
+Patterns match against the full relative path, the basename, and every ancestor directory segment.
 
 ## Conditional Dotfiles
 
 Annotate files and directories with `##` followed by conditions. Conditions are evaluated at stow time; the annotation is stripped from the symlink name.
 
-### Syntax
-
 ```
 filename##condition
 filename##cond1,cond2        # AND: all must pass
 filename##!condition          # NOT: negation
-dir##condition/file           # directory condition propagates to all children
+dir##condition/file           # directory condition propagates to children
 ```
 
 ### Built-in conditions
 
 | Condition | Description | Example |
 |-----------|-------------|---------|
-| `os.<name>` | Matches OS name from `/etc/os-release` (case-insensitive) | `file##os.arch` |
+| `os.<name>` | Matches OS from `/etc/os-release` | `file##os.arch` |
 | `shell.<name>` | Matches `$SHELL` basename | `file##shell.zsh` |
 | `exe.<name>` | True if executable is in `$PATH` | `file##exe.nvim` |
-| `wm.<name>` | Alias for `exe` (window manager check) | `file##wm.sway` |
-| `docker` | True if running inside Docker (`/.dockerenv`) | `file##!docker` |
-| `wsl` | True if running inside WSL (`/proc/version`) | `file##wsl` |
-| `no` | Always false -- file is never deployed | `cache##no` |
-| `extension` | Always true -- preserves file extension in source name | `script.conf##extension.sh` |
+| `wm.<name>` | Alias for `exe` | `file##wm.sway` |
+| `docker` | True inside Docker (`/.dockerenv`) | `file##!docker` |
+| `wsl` | True inside WSL (`/proc/version`) | `file##wsl` |
+| `laptop` | True if system has a battery | `file##laptop` |
+| `desktop` | True if system has no battery | `file##desktop` |
+| `no` | Always false -- never deployed | `cache##no` |
+| `extension` | Always true -- preserves file extension | `script.conf##extension.sh` |
 
 ### Examples
 
 ```
-.bashrc##shell.bash            # Only deploy if shell is bash
-.zshrc##shell.zsh              # Only deploy if shell is zsh
+.bashrc##shell.bash            # Only if shell is bash
 .config/sway##wm.sway/        # Entire directory only if sway is installed
 gpg-agent.conf##!wsl           # Deploy everywhere except WSL
 20-desktop.toml##!docker       # Skip in Docker containers
+.config/tlp##laptop/           # Power management only on laptops
+monitors.xml##desktop          # Static monitor layout on desktops only
 .local/lib/stow.sh##no/       # Never deploy (e.g. git submodule)
 ```
 
 ### Directory propagation
 
-When a directory segment has a condition, it propagates to all files inside:
+When a directory has a condition, it propagates to all files inside:
 
 ```
 .config/zsh##shell.zsh/
@@ -257,13 +190,11 @@ When a directory segment has a condition, it propagates to all files inside:
   .zprofile
 ```
 
-If shell is not zsh, both `.zshrc` and `.zprofile` are skipped. If shell is zsh, the whole directory is symlinked: `~/.config/zsh -> dotfiles/.config/zsh##shell.zsh`.
+If shell is not zsh, both files are skipped. If shell is zsh, the whole directory is symlinked as one: `~/.config/zsh -> dotfiles/.config/zsh##shell.zsh`.
 
 ## Custom Conditions
 
-stow.sh conditions are pluggable. Each condition is a shell function named `stow_sh::condition::<type>`. The built-in ones (`os`, `shell`, `exe`, etc.) are loaded from `conditions.d/`, but you can add your own.
-
-Place scripts in `$XDG_CONFIG_HOME/stow.sh/conditions/` (typically `~/.config/stow.sh/conditions/`). Each `.sh` file is sourced at startup and can define one or more condition functions:
+Place scripts in `$XDG_CONFIG_HOME/stow.sh/conditions/` (typically `~/.config/stow.sh/conditions/`). Each `.sh` file is sourced at startup:
 
 ```bash
 # ~/.config/stow.sh/conditions/custom.sh
@@ -272,25 +203,14 @@ stow_sh::condition::work() {
     [[ "$(hostname)" == *corp* ]]
 }
 
-stow_sh::condition::laptop() {
-    [[ -d /sys/class/power_supply/BAT0 ]]
-}
-
 stow_sh::condition::wayland() {
     [[ -n "${WAYLAND_DISPLAY:-}" ]]
 }
 ```
 
-Then use them like any built-in condition:
+Then use them: `file##work`, `.config/sway##wayland/`.
 
-```
-.config/vpn##work/              # VPN config only on work machines
-.config/tlp##laptop/            # Power management only on laptops
-.config/sway##wayland/          # Sway config only under Wayland
-monitors.xml##!laptop            # Static monitor layout on desktops only
-```
-
-Conditions support arguments via dot notation. The part after the dot is passed as `$1` to the function, which is how `os.arch`, `shell.zsh`, and `exe.nvim` work. User conditions can use the same pattern:
+Conditions support dot-notation arguments (`$1`):
 
 ```bash
 stow_sh::condition::host() {
@@ -299,17 +219,17 @@ stow_sh::condition::host() {
 ```
 
 ```
-.config/special##host.myserver/  # Only on the host named "myserver"
+.config/special##host.myserver/
 ```
 
 User conditions override built-ins if they define the same function name.
 
 ## Directory Folding
 
-stow.sh minimizes the number of symlinks by "folding" -- when an entire directory can be represented by a single symlink, it creates one directory symlink instead of individual file symlinks.
+stow.sh minimizes symlinks by "folding" -- symlinking an entire directory instead of individual files:
 
 ```
-# Without folding (--no-folding):
+# Without folding:
 ~/.config/nvim/init.lua -> dotfiles/.config/nvim/init.lua
 ~/.config/nvim/lua/plugins.lua -> dotfiles/.config/nvim/lua/plugins.lua
 
@@ -317,82 +237,28 @@ stow.sh minimizes the number of symlinks by "folding" -- when an entire director
 ~/.config/nvim -> dotfiles/.config/nvim
 ```
 
-A directory can be folded only if:
-1. All files on disk inside it are accounted for in the candidate list
-2. No descendant has a `##` annotation in its own name
-3. It is not a fold barrier
+A directory can be folded only if all files inside it are in the candidate list, no descendant has a `##` annotation, and it is not a fold barrier.
 
-### XDG-aware fold barriers
+### XDG fold barriers
 
-XDG directories act as fold barriers -- they cannot become symlinks because other applications expect them to be real directories.
+XDG directories act as fold barriers -- they stay real directories because other applications expect that. Barriers are computed from `XDG_CONFIG_HOME`, `XDG_DATA_HOME`, `XDG_STATE_HOME`, `XDG_CACHE_HOME`, `XDG_BIN_HOME`, and `XDG_RUNTIME_DIR`.
 
-Barriers are computed from set `XDG_*` environment variables:
-- `XDG_CONFIG_HOME` (typically `~/.config`)
-- `XDG_DATA_HOME` (typically `~/.local/share`)
-- `XDG_STATE_HOME` (typically `~/.local/state`)
-- `XDG_CACHE_HOME` (typically `~/.cache`)
-- `XDG_BIN_HOME` (typically `~/.local/bin`)
-- `XDG_RUNTIME_DIR`
-
-The barrier directory itself must be real, but children can still fold:
+The barrier itself stays real, but children can still fold:
 
 ```
 ~/.config/                 # real directory (barrier)
-~/.config/nvim -> dotfiles # single symlink (child of barrier, folded)
-~/.config/mise/config.toml # individual symlink (sibling has annotation)
+~/.config/nvim -> dotfiles # single symlink (folded child)
 ```
 
 Disable with `--no-xdg`.
 
 ### Auto-unfold
 
-When a fold point conflicts with an existing real directory at the target (e.g. `~/.gnupg` already has private keys), stow.sh falls back to creating individual symlinks inside it instead of reporting a conflict. Child directories that don't exist at the target are still folded into single symlinks.
+When a fold point conflicts with an existing real directory (e.g. `~/.gnupg` has private keys), stow.sh falls back to individual symlinks inside it. Child directories that don't exist at the target are still folded.
 
-## Development
+## Contributing
 
-### Prerequisites
-
-- Bash 4+
-- [bats-core](https://github.com/bats-core/bats-core) (for tests)
-- shfmt (for formatting, configured in `.editorconfig`)
-
-### Running tests
-
-```bash
-make test
-# or
-bats --verbose-run test/
-```
-
-### Commit convention
-
-This project enforces [Conventional Commits](https://www.conventionalcommits.org/). Install the git hook:
-
-```bash
-make hooks
-```
-
-Format: `<type>[(<scope>)][!]: <description>`
-
-Types: `feat`, `fix`, `docs`, `style`, `refactor`, `perf`, `test`, `build`, `ci`, `chore`, `revert`
-
-### Project structure
-
-```
-bin/stow.sh        CLI entrypoint
-src/main.sh        Orchestrator pipeline
-src/args.sh        CLI argument parsing
-src/log.sh         Logging framework
-src/filter.sh      Path filtering (git/regex/glob)
-src/scan.sh        Package directory scanner
-src/fold.sh        Directory folding + target resolution
-src/stow.sh        Stow/unstow operations
-src/xdg.sh         XDG fold barrier computation
-src/conditions.sh  Annotation parsing + condition evaluation
-conditions.d/      Built-in condition plugins
-hooks/             Git hooks (conventional commits)
-test/              bats test suite (255 tests)
-```
+See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup, architecture, testing, and commit conventions.
 
 ## License
 
@@ -400,5 +266,5 @@ MIT
 
 ## Acknowledgements
 
-- [GNU Stow](https://www.gnu.org/software/stow/) -- the original dotfiles symlink manager that inspired this project's core design and CLI interface.
+- [GNU Stow](https://www.gnu.org/software/stow/) -- the original dotfiles symlink manager that inspired this project.
 - [yadm](https://yadm.io/) -- its conditional file handling (`##` annotations) was the direct inspiration for stow.sh's conditional dotfiles system.
