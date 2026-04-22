@@ -1,3 +1,9 @@
+## v0.12.0 (2026-04-22)
+
+### Feat
+
+- **conditions**: add laptop and desktop condition plugins
+
 ## v0.11.1 (2026-04-22)
 
 ### Fix
