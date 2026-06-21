@@ -42,7 +42,7 @@ HOOK_SOURCES  := $(wildcard hooks/*)
 DIST    := dist
 BUNDLE  := $(DIST)/stow.sh
 
-.PHONY: all install uninstall hooks lint fmt bundle clean test release print-vars
+.PHONY: all install uninstall hooks lint fmt bundle clean toc test release print-vars
 
 all:
 	@echo "Nothing to build for $(PROJECT) (pure shell)."
@@ -92,6 +92,9 @@ fmt:
 
 bundle:
 	@scripts/bundle.sh "$(BUNDLE)"
+
+toc:
+	@scripts/update_toc.sh README.md
 
 clean:
 	$(RMDIR) "$(DIST)"

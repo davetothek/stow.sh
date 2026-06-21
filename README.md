@@ -15,6 +15,33 @@
 </tr>
 </table>
 
+<!--toc:start-->
+- [What is this?](#what-is-this)
+- [Features](#features)
+- [Differences from GNU Stow](#differences-from-gnu-stow)
+- [Installation](#installation)
+  - [Single file (no install)](#single-file-no-install)
+  - [With mise](#with-mise)
+  - [From source](#from-source)
+  - [Uninstall](#uninstall)
+- [Quick Start](#quick-start)
+  - [Self-stow mode](#self-stow-mode)
+- [Usage](#usage)
+  - [Filtering priority](#filtering-priority)
+  - [.stowignore](#stowignore)
+- [Conditional Dotfiles](#conditional-dotfiles)
+  - [Built-in conditions](#built-in-conditions)
+  - [Examples](#examples)
+  - [Directory propagation](#directory-propagation)
+- [Custom Conditions](#custom-conditions)
+- [Directory Folding](#directory-folding)
+  - [XDG fold barriers](#xdg-fold-barriers)
+  - [Auto-unfold](#auto-unfold)
+- [Contributing](#contributing)
+- [License](#license)
+- [Acknowledgements](#acknowledgements)
+<!--toc:end-->
+
 ## What is this?
 
 If you keep your dotfiles in one directory (often a git repo) and want them to
@@ -45,34 +72,6 @@ manager." stow.sh is a pure-Bash reimplementation of that idea with extras
 aimed at dotfiles (conditional files, git-aware filtering, and more). It is
 **not** a byte-for-byte GNU Stow clone — see
 [Differences from GNU Stow](#differences-from-gnu-stow).
-
-<!--toc:start-->
-- [stow.sh](#stowsh)
-  - [What is this?](#what-is-this)
-  - [Features](#features)
-  - [Differences from GNU Stow](#differences-from-gnu-stow)
-  - [Installation](#installation)
-    - [Single file (no install)](#single-file-no-install)
-    - [With mise](#with-mise)
-    - [From source](#from-source)
-    - [Uninstall](#uninstall)
-  - [Quick Start](#quick-start)
-    - [Self-stow mode](#self-stow-mode)
-  - [Usage](#usage)
-    - [Filtering priority](#filtering-priority)
-    - [.stowignore](#stowignore)
-  - [Conditional Dotfiles](#conditional-dotfiles)
-    - [Built-in conditions](#built-in-conditions)
-    - [Examples](#examples)
-    - [Directory propagation](#directory-propagation)
-  - [Custom Conditions](#custom-conditions)
-  - [Directory Folding](#directory-folding)
-    - [XDG fold barriers](#xdg-fold-barriers)
-    - [Auto-unfold](#auto-unfold)
-  - [Contributing](#contributing)
-  - [License](#license)
-  - [Acknowledgements](#acknowledgements)
-<!--toc:end-->
 
 ## Features
 
