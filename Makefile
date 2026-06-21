@@ -32,7 +32,17 @@ DESTDIR ?=
 BINDIR  := $(DESTDIR)$(bindir)
 DATADIR := $(DESTDIR)$(datadir)
 
-.PHONY: all install uninstall hooks test release print-vars
+# Shell sources formatted by shfmt — all carry a .sh extension so .editorconfig
+# applies. Git hooks are linted but NOT formatted (no extension → shfmt would
+# wrongly default them to tab indentation).
+SHELL_SOURCES := $(wildcard src/*.sh) $(wildcard bin/*.sh) $(wildcard conditions.d/*.sh) $(wildcard scripts/*.sh)
+HOOK_SOURCES  := $(wildcard hooks/*)
+
+# Single-file bundle output.
+DIST    := dist
+BUNDLE  := $(DIST)/stow.sh
+
+.PHONY: all install uninstall hooks lint fmt bundle clean test release print-vars
 
 all:
 	@echo "Nothing to build for $(PROJECT) (pure shell)."
@@ -62,6 +72,30 @@ hooks:
 	@$(INSTALL) -m 755 hooks/* .git/hooks/
 	@echo "Done. Conventional commit format is now enforced."
 
+lint:
+	@command -v shellcheck >/dev/null 2>&1 || { echo >&2 "ERROR: shellcheck not found. Please install shellcheck."; exit 1; }
+	@echo "Running shellcheck..."
+	shellcheck $(SHELL_SOURCES) $(HOOK_SOURCES)
+	@# shfmt is advisory: the tree is not yet fully shfmt-clean, so a diff
+	@# here is a hint, not a failure. Run `make fmt` to apply formatting.
+	@if command -v shfmt >/dev/null 2>&1; then \
+		echo "Checking formatting (advisory; run 'make fmt' to apply)..."; \
+		shfmt -d $(SHELL_SOURCES) || true; \
+	else \
+		echo "shfmt not found — skipping format check."; \
+	fi
+
+fmt:
+	@command -v shfmt >/dev/null 2>&1 || { echo >&2 "ERROR: shfmt not found. Please install shfmt."; exit 1; }
+	@echo "Formatting shell sources with shfmt..."
+	shfmt -w $(SHELL_SOURCES)
+
+bundle:
+	@scripts/bundle.sh "$(BUNDLE)"
+
+clean:
+	$(RMDIR) "$(DIST)"
+
 test:
 	@echo "Running tests..."
 	@command -v bats >/dev/null 2>&1 || { echo >&2 "ERROR: bats not found. Please install bats-core."; exit 1; }
@@ -76,7 +110,8 @@ release:
 	fi
 	@# Ensure hooks are installed
 	@$(MAKE) --no-print-directory hooks
-	@# Run tests first
+	@# Lint then test before releasing
+	@$(MAKE) --no-print-directory lint || { echo >&2 "ERROR: lint failed. Fix before releasing."; exit 1; }
 	@echo "Running tests..."
 	@bats --verbose-run test/ || { echo >&2 "ERROR: tests failed. Fix before releasing."; exit 1; }
 	@# Bump version (creates commit + tag)

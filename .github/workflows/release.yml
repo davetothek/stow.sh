@@ -16,26 +16,43 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Run tests
+      - name: Install tools
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq bats shellcheck
+
+      - name: Lint
+        run: shellcheck src/*.sh bin/*.sh conditions.d/*.sh scripts/*.sh hooks/*
+
+      - name: Test
         run: |
           git config --global user.email "ci@stow.sh"
           git config --global user.name "CI"
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq bats
           bats --verbose-run test/
 
-      - name: Build tarball
+      - name: Build artifacts
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
-          ARCHIVE="stow.sh-${VERSION}.tar.gz"
-          tar czf "$ARCHIVE" \
+          mkdir -p dist
+
+          # 1. Source tarball — extract and `make install`.
+          tar czf "dist/stow.sh-${VERSION}.tar.gz" \
             --transform "s,^,stow.sh-${VERSION}/," \
             bin/ src/ conditions.d/ Makefile LICENSE
-          echo "ARCHIVE=$ARCHIVE" >> "$GITHUB_ENV"
+
+          # 2. Single self-contained executable — download, chmod +x, run.
+          scripts/bundle.sh dist/stow.sh
+
+          # 3. Checksums over both artifacts.
+          ( cd dist && sha256sum stow.sh "stow.sh-${VERSION}.tar.gz" > SHA256SUMS )
+
           echo "VERSION=$VERSION" >> "$GITHUB_ENV"
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          files: ${{ env.ARCHIVE }}
+          files: |
+            dist/stow.sh
+            dist/stow.sh-${{ env.VERSION }}.tar.gz
+            dist/SHA256SUMS
           generate_release_notes: true
