@@ -1,3 +1,20 @@
+## v0.15.0 (2026-06-21)
+
+### BREAKING CHANGE
+
+- a conflict now aborts the entire run instead of applying
+what it can; --force no longer overwrites real directories; --defer and
+--override are removed.
+
+### Feat
+
+- **hooks**: add pre-commit hook running shellcheck and tests
+- **cli**: atomic conflict pre-flight, harden --force, drop dead flags
+
+### Refactor
+
+- make shell sources shellcheck-clean
+
 ## v0.14.1 (2026-05-11)
 
 ### Fix

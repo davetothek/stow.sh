@@ -1,6 +1,6 @@
 [tool.commitizen]
 name = "cz_conventional_commits"
-version = "0.14.1"
+version = "0.15.0"
 # Stay in 0.x: breaking changes bump the minor version, not to 1.0.0.
 major_version_zero = true
 tag_format = "v$version"
