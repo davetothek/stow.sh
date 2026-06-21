@@ -15,10 +15,44 @@
 </tr>
 </table>
 
+## What is this?
+
+If you keep your dotfiles in one directory (often a git repo) and want them to
+show up in the right places in your home directory, **stow.sh creates the
+symlinks for you**. You organize the files once; it links them into place — and
+removes them cleanly when you ask.
+
+For example, given this layout:
+
+```
+~/dotfiles/
+  bash/
+    .bashrc
+    .bash_profile
+```
+
+running `stow.sh -t ~ -d ~/dotfiles bash` produces:
+
+```
+~/.bashrc        ->  dotfiles/bash/.bashrc
+~/.bash_profile  ->  dotfiles/bash/.bash_profile
+```
+
+Each top-level directory under your dotfiles (here, `bash`) is a *package* you
+can stow or unstow independently. This is the model
+[GNU Stow](https://www.gnu.org/software/stow/) pioneered — a "symlink farm
+manager." stow.sh is a pure-Bash reimplementation of that idea with extras
+aimed at dotfiles (conditional files, git-aware filtering, and more). It is
+**not** a byte-for-byte GNU Stow clone — see
+[Differences from GNU Stow](#differences-from-gnu-stow).
+
 <!--toc:start-->
 - [stow.sh](#stowsh)
+  - [What is this?](#what-is-this)
   - [Features](#features)
+  - [Differences from GNU Stow](#differences-from-gnu-stow)
   - [Installation](#installation)
+    - [Single file (no install)](#single-file-no-install)
     - [With mise](#with-mise)
     - [From source](#from-source)
     - [Uninstall](#uninstall)
@@ -42,7 +76,8 @@
 
 ## Features
 
-Everything GNU Stow does, plus:
+Core symlink-farm management — stow, unstow, restow, directory folding, and
+conflict handling — plus extras aimed at dotfiles:
 
 - Conditional dotfiles via `##` annotations (e.g. `file##os.linux,shell.bash`)
 - Git-aware filtering -- respects `.gitignore` rules including negation patterns
@@ -51,9 +86,53 @@ Everything GNU Stow does, plus:
 - XDG-aware directory folding -- `XDG_*` directories stay real, their children can still fold
 - Auto-unfold -- falls back to individual symlinks when a target directory already exists
 - Pluggable condition predicates as shell functions
-- Pure Bash 4+, no external dependencies
+- Atomic by default -- if any conflict is detected, nothing is changed (see below)
+- Pure Bash 4+, no external dependencies (GNU Stow requires Perl)
+
+## Differences from GNU Stow
+
+stow.sh covers the common dotfiles workflow but is **not** a drop-in
+replacement for every GNU Stow option. Be aware of the following.
+
+**Same idea, same core flags:** `-S`/`-D`/`-R` (stow/delete/restow),
+`-t`/`--target`, `-d`/`--dir`, `--adopt`, `--no-folding`, directory folding,
+and **all-or-nothing conflict handling** — like GNU Stow, stow.sh checks for
+conflicts up front and makes no changes if any are found.
+
+**stow.sh adds (not in GNU Stow):** `##` conditional files, git-aware
+filtering (`-g`/`-G`), per-package `.stowignore`, XDG fold barriers
+(`--no-xdg`), and always-relative symlinks.
+
+**GNU Stow features stow.sh does *not* implement:**
+
+| GNU Stow | Status in stow.sh |
+|----------|-------------------|
+| `-p`/`--compat` (legacy symlink-name handling) | not supported |
+| `--dotfiles` (`dot-bashrc` → `.bashrc` translation) | not supported |
+| `.stow-local-ignore` / `.stow-global-ignore` | use `.stowignore` instead |
+| `--defer` / `--override` (cross-package ownership) | not supported |
+| `-p`-style multiple independent stow dirs in one run | not supported |
+
+If you depend on any of those, use GNU Stow. For dotfiles, stow.sh is designed
+to be a friendlier superset of the *common* workflow.
 
 ## Installation
+
+### Single file (no install)
+
+Each [release](https://github.com/davetothek/stow.sh/releases) ships a
+self-contained `stow.sh` — every module bundled into one script. Download it,
+make it executable, and run:
+
+```bash
+curl -fsSLO https://github.com/davetothek/stow.sh/releases/latest/download/stow.sh
+chmod +x stow.sh
+./stow.sh --version
+```
+
+Verify it against the published `SHA256SUMS` if you like. Built-in conditions
+are baked in; user conditions in `$XDG_CONFIG_HOME/stow.sh/conditions` still
+load.
 
 ### With mise
 
@@ -142,8 +221,6 @@ Folding:
 Conflict handling:
   -f, --force               Overwrite existing symlinks at the target
   --adopt                   Move existing target files into the package
-  --defer=REGEX             Skip if a symlink already exists at the target
-  --override=REGEX          Replace symlinks from other packages
 
 Output:
   -v, --verbose             Show more detail (repeat: -vvv)

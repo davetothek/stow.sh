@@ -1,6 +1,8 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 David Kristiansen
 
+# shellcheck shell=bash
+
 # fold.sh — directory folding logic
 #
 # Determines which directories can be symlinked as a whole instead of
@@ -208,17 +210,10 @@ stow_sh::fold_targets() {
         stow_sh::log debug 3 "Active fold barriers: ${!barrier_dirs[*]}"
     fi
 
-    # Build a set of candidates for O(1) lookup
-    local -A candidate_set
-    local candidate
-    for candidate in "${candidates[@]}"; do
-        candidate_set["$candidate"]=1
-    done
-
     # Build direct-children-per-dir count: for each candidate file,
     # count it as a direct child of its immediate parent directory.
     local -A dir_child_count
-    local dir
+    local candidate dir
     for candidate in "${candidates[@]}"; do
         stow_sh::__parent_of "$candidate"
         dir="$_dir"
@@ -324,6 +319,9 @@ stow_sh::fold_targets() {
         if stow_sh::__dir_complete "$dir" "$pkg_root" dir_child_count covered_dirs; then
             stow_sh::log debug 3 "Dir '$dir' is foldable (filesystem complete)"
             foldable_dirs["$dir"]=1
+            # covered_dirs feeds the next iteration's __dir_complete via
+            # nameref, which shellcheck's per-scope analysis can't see.
+            # shellcheck disable=SC2034
             covered_dirs["$dir"]=1
         fi
     done

@@ -377,6 +377,76 @@ teardown() {
     [ "$(cat "$TARGET_DIR/.bashrc")" = "existing" ]
 }
 
+@test "integration: force refuses to delete a real directory" {
+    local pkg="$SOURCE_DIR/pkg"
+    mkdir -p "$pkg"
+    echo "from-pkg" > "$pkg/foo"
+
+    # Target has a real, populated directory where a file wants to go.
+    mkdir -p "$TARGET_DIR/foo"
+    echo "precious" > "$TARGET_DIR/foo/keep.txt"
+
+    run "$STOW_SH" -G --no-xdg -f -d "$SOURCE_DIR" -t "$TARGET_DIR" -S pkg
+    [ "$status" -eq 1 ]
+    # The real directory and its contents must be untouched.
+    [ -d "$TARGET_DIR/foo" ] && [ ! -L "$TARGET_DIR/foo" ]
+    [ "$(cat "$TARGET_DIR/foo/keep.txt")" = "precious" ]
+}
+
+# ============================================================
+# Atomicity — conflict pre-flight (all-or-nothing)
+# ============================================================
+
+@test "integration: conflict aborts with zero changes (no partial apply)" {
+    local pkg="$SOURCE_DIR/pkg"
+    mkdir -p "$pkg"
+    echo "A" > "$pkg/aaa"   # would-be-clean link
+    echo "Z" > "$pkg/zzz"   # conflicts with a real file below
+
+    echo "existing" > "$TARGET_DIR/zzz"
+
+    run "$STOW_SH" -G --no-xdg -d "$SOURCE_DIR" -t "$TARGET_DIR" -S pkg
+    [ "$status" -eq 1 ]
+    # The non-conflicting link must NOT have been created — the whole run
+    # aborts before touching the filesystem.
+    [ ! -e "$TARGET_DIR/aaa" ]
+    # The conflicting file is left exactly as it was.
+    [ ! -L "$TARGET_DIR/zzz" ]
+    [ "$(cat "$TARGET_DIR/zzz")" = "existing" ]
+}
+
+@test "integration: a conflict in one package blocks all packages" {
+    mkdir -p "$SOURCE_DIR/clean" "$SOURCE_DIR/dirty"
+    echo "ok" > "$SOURCE_DIR/clean/good"
+    echo "x" > "$SOURCE_DIR/dirty/bad"
+
+    # Only the second package conflicts.
+    echo "existing" > "$TARGET_DIR/bad"
+
+    run "$STOW_SH" -G --no-xdg -d "$SOURCE_DIR" -t "$TARGET_DIR" -S clean dirty
+    [ "$status" -eq 1 ]
+    # The clean package must not be applied either — abort is global.
+    [ ! -e "$TARGET_DIR/good" ]
+    [ "$(cat "$TARGET_DIR/bad")" = "existing" ]
+}
+
+@test "integration: force directory-refusal is atomic (no partial apply)" {
+    local pkg="$SOURCE_DIR/pkg"
+    mkdir -p "$pkg"
+    echo "A" > "$pkg/aaa"
+    echo "from-pkg" > "$pkg/foo"
+
+    mkdir -p "$TARGET_DIR/foo"
+    echo "precious" > "$TARGET_DIR/foo/keep.txt"
+
+    run "$STOW_SH" -G --no-xdg -f -d "$SOURCE_DIR" -t "$TARGET_DIR" -S pkg
+    [ "$status" -eq 1 ]
+    # Pre-flight catches the directory refusal, so the clean link is not made.
+    [ ! -e "$TARGET_DIR/aaa" ]
+    [ -d "$TARGET_DIR/foo" ] && [ ! -L "$TARGET_DIR/foo" ]
+    [ "$(cat "$TARGET_DIR/foo/keep.txt")" = "precious" ]
+}
+
 # ============================================================
 # Adopt mode (--adopt)
 # ============================================================

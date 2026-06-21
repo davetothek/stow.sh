@@ -1,6 +1,8 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 David Kristiansen
 
+# shellcheck shell=bash
+
 # xdg.sh — XDG-aware fold barrier detection
 #
 # When XDG_* environment variables are set, their directories become fold

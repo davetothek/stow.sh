@@ -1,6 +1,8 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 David Kristiansen
 
+# shellcheck shell=bash
+
 # exe — true if an executable is found in $PATH
 #
 # The argument after the dot is the binary name to look for.

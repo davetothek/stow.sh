@@ -3,6 +3,9 @@
 # Copyright (c) 2025 David Kristiansen
 
 setup_file() {
+  # Must be exported: bats runs setup_file in a separate shell from setup()
+  # and the tests, so a non-exported var would be empty there.
+  export TEST_REPO
   TEST_REPO=$(mktemp -d)
   cd "$TEST_REPO"
 

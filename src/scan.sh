@@ -1,6 +1,8 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 David Kristiansen
 
+# shellcheck shell=bash
+
 # scan.sh — package directory scanner
 #
 # Recursively finds all regular files inside a stow package directory.

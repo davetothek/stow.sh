@@ -1,6 +1,8 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 David Kristiansen
 
+# shellcheck shell=bash
+
 # desktop — true if the system has no battery (stationary machine)
 #
 # Inverse of the laptop condition. Returns true when no

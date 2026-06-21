@@ -1,0 +1,52 @@
+#!/usr/bin/env bash
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2025 David Kristiansen
+
+# pre-commit — run shellcheck and the test suite before allowing a commit.
+#
+# Install via: make hooks
+#
+# Blocks the commit if shellcheck reports problems or any test fails. If a
+# tool is not installed it is skipped with a warning rather than blocking —
+# CI (see .github/workflows/ci.yml) is the backstop that always runs both.
+
+set -euo pipefail
+
+# Resolve the repository root so the hook works regardless of where git
+# invokes it from.
+repo_root="$(git rev-parse --show-toplevel)"
+cd "$repo_root"
+
+status=0
+
+# --- shellcheck ---
+if command -v shellcheck > /dev/null 2>&1; then
+    echo "pre-commit: running shellcheck..."
+    # Word-splitting of the globs is intentional here.
+    # shellcheck disable=SC2086
+    if ! shellcheck src/*.sh bin/*.sh conditions.d/*.sh; then
+        echo >&2 "pre-commit: shellcheck failed."
+        status=1
+    fi
+else
+    echo >&2 "pre-commit: WARNING — shellcheck not found, skipping lint."
+fi
+
+# --- tests ---
+if command -v bats > /dev/null 2>&1; then
+    echo "pre-commit: running tests..."
+    if ! bats test/; then
+        echo >&2 "pre-commit: tests failed."
+        status=1
+    fi
+else
+    echo >&2 "pre-commit: WARNING — bats not found, skipping tests."
+fi
+
+if [[ "$status" -ne 0 ]]; then
+    echo >&2 ""
+    echo >&2 "pre-commit: commit aborted. Fix the issues above, or bypass with"
+    echo >&2 "            'git commit --no-verify' (not recommended)."
+fi
+
+exit "$status"

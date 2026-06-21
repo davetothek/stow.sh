@@ -1,6 +1,8 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 David Kristiansen
 
+# shellcheck shell=bash
+
 # log.sh — logging framework with color and debug levels
 #
 # All log output goes to stderr so it never interferes with stdout data
@@ -32,7 +34,7 @@ stow_sh::log_setup() {
     _stow_sh_debug_level="${2:-0}"
     case "$mode" in
         always) _stow_sh_use_color=true ;;
-        auto)   stow_sh::__supports_color && _stow_sh_use_color=true || true ;;
+        auto)   if stow_sh::__supports_color; then _stow_sh_use_color=true; fi ;;
         never)  _stow_sh_use_color=false ;;
     esac
 }
@@ -104,6 +106,10 @@ stow_sh::log() {
 #
 # Usage: stow_sh::report <symbol> <message...>
 stow_sh::report() {
+    # Suppressed during the conflict pre-flight pass — that pass only checks
+    # for conflicts and must not emit "what changed" output (nothing has).
+    [[ "${_stow_sh_preflight:-false}" == true ]] && return 0
+
     local symbol="$1"
     shift
     local message="$*"

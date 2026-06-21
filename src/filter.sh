@@ -1,6 +1,8 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 David Kristiansen
 
+# shellcheck shell=bash
+
 # filter.sh — path filtering engine
 #
 # Filters candidate paths through up to four layers:
@@ -86,6 +88,9 @@ stow_sh::match_stowignore() {
     fi
 
     local pattern anchored
+    # SC2053: the unquoted right-hand sides below are intentional — stowignore
+    # entries are globs and must be matched as patterns, not literals.
+    # shellcheck disable=SC2053
     for pattern in "${_stow_sh_stowignore_glob[@]}"; do
         # Leading '/' anchors to package root (like .gitignore): strip it
         # and force path-only matching even if no '/' remains.
@@ -298,6 +303,8 @@ stow_sh::match_regex_ignore() {
 # Returns: 0 if matched (should ignore), 1 otherwise
 stow_sh::match_glob_ignore() {
     local path="$1"
+    # SC2053: -I patterns are globs; the unquoted RHS is intentional.
+    # shellcheck disable=SC2053
     for pattern in "${_stow_sh_ignore_glob[@]}"; do
         [[ "$path" == $pattern ]] && return 0
     done

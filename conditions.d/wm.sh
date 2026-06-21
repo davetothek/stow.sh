@@ -1,6 +1,8 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 David Kristiansen
 
+# shellcheck shell=bash
+
 # wm — alias for exe; true if a window manager binary is in $PATH
 #
 # Semantically distinct from exe to make dotfile annotations more

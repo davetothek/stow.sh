@@ -1,6 +1,8 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 David Kristiansen
 
+# shellcheck shell=bash
+
 # no — always false; files annotated with ##no are never deployed
 #
 # Useful for tracking files in the dotfiles repo that should not be

@@ -1,0 +1,2 @@
+# Build artifacts (single-file bundle, release tarballs, checksums)
+/dist/

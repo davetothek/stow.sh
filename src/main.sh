@@ -121,48 +121,23 @@ stow_sh::resolve_package() {
 }
 
 # Top-level entry point: parse → setup → resolve → stow/unstow/restow.
-main() {
-    stow_sh::parse_args "$@"
-    stow_sh::log_setup "$(stow_sh::get_color_mode)" "$(stow_sh::get_debug)"
-    stow_sh::log debug 3 "Raw args: $*"
+# Run every stow/unstow/restow operation once over the resolved package
+# lists. Reads package lists via the args getters and fold barriers from the
+# global _stow_sh_barrier_flags array, so it is self-contained and can be
+# called twice (once for the conflict pre-flight, once to apply).
+#
+# Honors dry-run and pre-flight modes via the predicates in __create_link /
+# __remove_link, so it never mutates the filesystem while either is set.
+#
+# Usage: stow_sh::__apply_operations target_dir
+# Returns: 0 if all operations succeeded, 1 if any had an unresolved conflict
+stow_sh::__apply_operations() {
+    local target_dir="$1"
 
-    stow_sh::log debug 2 "Setting up paths..."
-    stow_sh::setup_paths
-
-    local source_dir target_dir
-    source_dir="$(stow_sh::get_source)"
-    target_dir="$(stow_sh::get_target)"
-
-    # Compute XDG fold barriers relative to the target directory
-    local -a barrier_flags=()
-    if stow_sh::is_xdg_mode; then
-        local -a xdg_barriers
-        mapfile -t xdg_barriers < <(stow_sh::compute_xdg_barriers "$target_dir")
-        local b
-        for b in "${xdg_barriers[@]}"; do
-            [[ -n "$b" ]] && barrier_flags+=("--barrier=$b")
-        done
-        if [[ ${#barrier_flags[@]} -gt 0 ]]; then
-            stow_sh::log debug 1 "XDG fold barriers: ${xdg_barriers[*]}"
-        fi
-    fi
-
-    # Gather package lists for each operation
     local -a stow_packages unstow_packages restow_packages
     mapfile -t stow_packages < <(stow_sh::get_stow_packages)
     mapfile -t unstow_packages < <(stow_sh::get_unstow_packages)
     mapfile -t restow_packages < <(stow_sh::get_restow_packages)
-
-    # Count non-empty package names
-    local total=0
-    local _p
-    for _p in "${stow_packages[@]}" "${unstow_packages[@]}" "${restow_packages[@]}"; do
-        [[ -n "$_p" ]] && total=$((total + 1))
-    done
-    if [[ "$total" -eq 0 ]]; then
-        stow_sh::log error "No stow targets provided."
-        stow_sh::usage 1
-    fi
 
     local had_error=false
 
@@ -175,7 +150,7 @@ main() {
 
         # Unstow phase: skip folding (let __remove_link handle filesystem state)
         local -a unstow_resolved
-        if resolve_output="$(stow_sh::resolve_package --no-fold barrier_flags "$pkg_dir")"; then
+        if resolve_output="$(stow_sh::resolve_package --no-fold _stow_sh_barrier_flags "$pkg_dir")"; then
             if [[ -n "$resolve_output" ]]; then
                 mapfile -t unstow_resolved <<< "$resolve_output"
             else
@@ -188,7 +163,7 @@ main() {
 
         # Stow phase: use fold logic for optimal symlinks
         local -a stow_resolved
-        if resolve_output="$(stow_sh::resolve_package barrier_flags "$pkg_dir")"; then
+        if resolve_output="$(stow_sh::resolve_package _stow_sh_barrier_flags "$pkg_dir")"; then
             if [[ -n "$resolve_output" ]]; then
                 mapfile -t stow_resolved <<< "$resolve_output"
             else
@@ -213,7 +188,7 @@ main() {
         stow_sh::log debug 1 "Unstowing package: $pkg"
 
         local -a resolved
-        if resolve_output="$(stow_sh::resolve_package --no-fold barrier_flags "$pkg_dir")"; then
+        if resolve_output="$(stow_sh::resolve_package --no-fold _stow_sh_barrier_flags "$pkg_dir")"; then
             if [[ -n "$resolve_output" ]]; then
                 mapfile -t resolved <<< "$resolve_output"
             else
@@ -237,7 +212,7 @@ main() {
         stow_sh::log debug 1 "Stowing package: $pkg"
 
         local -a resolved
-        if resolve_output="$(stow_sh::resolve_package barrier_flags "$pkg_dir")"; then
+        if resolve_output="$(stow_sh::resolve_package _stow_sh_barrier_flags "$pkg_dir")"; then
             if [[ -n "$resolve_output" ]]; then
                 mapfile -t resolved <<< "$resolve_output"
             else
@@ -254,7 +229,82 @@ main() {
         stow_sh::stow_package "$pkg_dir" "$target_dir" "${resolved[@]}" || had_error=true
     done
 
-    if [[ "$had_error" == true ]]; then
+    [[ "$had_error" == true ]] && return 1
+    return 0
+}
+
+main() {
+    stow_sh::parse_args "$@"
+    stow_sh::log_setup "$(stow_sh::get_color_mode)" "$(stow_sh::get_debug)"
+    stow_sh::log debug 3 "Raw args: $*"
+
+    stow_sh::log debug 2 "Setting up paths..."
+    stow_sh::setup_paths
+
+    local source_dir target_dir
+    source_dir="$(stow_sh::get_source)"
+    target_dir="$(stow_sh::get_target)"
+
+    # Compute XDG fold barriers relative to the target directory. Global so
+    # __apply_operations can pass them to resolve_package by name (nameref).
+    declare -ga _stow_sh_barrier_flags=()
+    if stow_sh::is_xdg_mode; then
+        local -a xdg_barriers
+        mapfile -t xdg_barriers < <(stow_sh::compute_xdg_barriers "$target_dir")
+        local b
+        for b in "${xdg_barriers[@]}"; do
+            [[ -n "$b" ]] && _stow_sh_barrier_flags+=("--barrier=$b")
+        done
+        if [[ ${#_stow_sh_barrier_flags[@]} -gt 0 ]]; then
+            stow_sh::log debug 1 "XDG fold barriers: ${xdg_barriers[*]}"
+        fi
+    fi
+
+    # Count non-empty package names across all operations
+    local -a all_packages
+    mapfile -t all_packages < <(
+        stow_sh::get_stow_packages
+        stow_sh::get_unstow_packages
+        stow_sh::get_restow_packages
+    )
+    local total=0 _p
+    for _p in "${all_packages[@]}"; do
+        [[ -n "$_p" ]] && total=$((total + 1))
+    done
+    if [[ "$total" -eq 0 ]]; then
+        stow_sh::log error "No stow targets provided."
+        stow_sh::usage 1
+    fi
+
+    # User-requested dry-run: show what would happen, never apply.
+    if stow_sh::is_dry_run; then
+        if ! stow_sh::__apply_operations "$target_dir"; then
+            stow_sh::log error "Some operations would fail"
+            exit 1
+        fi
+        stow_sh::log debug 1 "Dry-run complete"
+        return 0
+    fi
+
+    # Phase 1 — conflict pre-flight. Run every operation mutation-free; if any
+    # unresolved conflict exists, abort with ZERO changes. This is the
+    # all-or-nothing guarantee GNU Stow provides: never leave a half-applied
+    # tree. Conflicts resolvable by --force/--adopt are not flagged here.
+    _stow_sh_preflight=true
+    _stow_sh_dry_run=true
+    local preflight_ok=true
+    stow_sh::__apply_operations "$target_dir" || preflight_ok=false
+    _stow_sh_dry_run=false
+    _stow_sh_preflight=false
+
+    if [[ "$preflight_ok" == false ]]; then
+        stow_sh::log error "Aborting: conflicts detected — no changes made. Resolve the conflicts above, or re-run with --force (overwrite) or --adopt (absorb existing files)."
+        exit 1
+    fi
+
+    # Phase 2 — apply for real. A failure here is unexpected (e.g. a concurrent
+    # filesystem change between the two passes) but still reported loudly.
+    if ! stow_sh::__apply_operations "$target_dir"; then
         stow_sh::log error "Some operations failed"
         exit 1
     fi
