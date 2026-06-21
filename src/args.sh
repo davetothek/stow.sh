@@ -1,6 +1,8 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 David Kristiansen
 
+# shellcheck shell=bash
+
 # args.sh — CLI argument parsing, path setup, and getter functions
 #
 # Parses command-line options into internal state variables, resolves
@@ -18,6 +20,10 @@
 _stow_sh_force=false
 _stow_sh_debug=0
 _stow_sh_dry_run=false
+# Internal: set during the conflict pre-flight pass. When true, operations
+# run mutation-free (like dry-run) and user-facing reports are suppressed —
+# only conflict errors are printed. Not a user-facing flag.
+_stow_sh_preflight=false
 _stow_sh_color_mode="auto"
 _stow_sh_adopt=false
 _stow_sh_no_folding=false
@@ -26,8 +32,6 @@ _stow_sh_git_mode="auto"  # auto, true, false
 _stow_sh_dir=""
 _stow_sh_target=""
 _stow_sh_source=""
-declare -a _stow_sh_defer=()
-declare -a _stow_sh_override=()
 declare -a _stow_sh_ignore=()
 declare -a _stow_sh_ignore_glob=()
 declare -a _stow_sh_stow_packages=()
@@ -60,6 +64,7 @@ stow_sh::is_xdg_mode() { [[ "${_stow_sh_xdg_mode:-true}" == true ]]; }
 stow_sh::is_dry_run() { [[ "${_stow_sh_dry_run:-false}" == true ]]; }
 stow_sh::is_force() { [[ "${_stow_sh_force:-false}" == true ]]; }
 stow_sh::is_adopt() { [[ "${_stow_sh_adopt:-false}" == true ]]; }
+stow_sh::is_preflight() { [[ "${_stow_sh_preflight:-false}" == true ]]; }
 
 # Print usage information and exit.
 #
@@ -121,10 +126,6 @@ Conflict handling:
   -f, --force               Overwrite existing symlinks at the target
   --adopt                   Move existing target files into the source
                             package, then create the symlink
-  --defer=REGEX             Skip if a symlink from another package
-                            already exists at the target (repeatable)
-  --override=REGEX          Replace symlinks from other packages that
-                            match the pattern (repeatable)
 
 Output:
   -v, --verbose             Show more detail (repeat for more: -vvv)
@@ -295,16 +296,6 @@ stow_sh::parse_args() {
                 stow_sh::log debug 2 "Disabled XDG-aware fold barriers"
                 shift
                 ;;
-            --defer=*)
-                _stow_sh_defer+=("${1#*=}")
-                stow_sh::log debug 2 "Added defer pattern: ${1#*=}"
-                shift
-                ;;
-            --override=*)
-                _stow_sh_override+=("${1#*=}")
-                stow_sh::log debug 2 "Added override pattern: ${1#*=}"
-                shift
-                ;;
             -h | --help)
                 stow_sh::usage 0
                 ;;
@@ -316,7 +307,7 @@ stow_sh::parse_args() {
                 shift
                 break
                 ;;
-            -* | --*)
+            -*)
                 stow_sh::log error "Unknown option: $1"
                 stow_sh::usage 1
                 ;;

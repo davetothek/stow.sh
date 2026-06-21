@@ -165,18 +165,6 @@ parse_no_git() {
     [[ "${pats[0]}" == "*.bak" ]]
 }
 
-# --- Defer / Override ---
-
-@test "parse_args: --defer= adds defer pattern" {
-    parse_no_git --defer=info -S pkg
-    [[ "${_stow_sh_defer[0]}" == "info" ]]
-}
-
-@test "parse_args: --override= adds override pattern" {
-    parse_no_git --override=info -S pkg
-    [[ "${_stow_sh_override[0]}" == "info" ]]
-}
-
 # --- Short-flag expansion ---
 
 @test "parse_args: combined short flags -fn expands to -f -n" {

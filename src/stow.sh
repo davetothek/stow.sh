@@ -1,6 +1,8 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 David Kristiansen
 
+# shellcheck shell=bash
+
 # stow.sh — stow and unstow operations
 #
 # Creates and removes symlinks for resolved targets. Each target is either
@@ -66,7 +68,7 @@ stow_sh::stow_package() {
         fi
         local link_path="$target_dir/$link_rel"
 
-        stow_sh::__create_link "$source_path" "$link_path" "$pkg_dir" || had_error=true
+        stow_sh::__create_link "$source_path" "$link_path" "$pkg_dir" "$target_dir" || had_error=true
     done
 
     if [[ "$had_error" == true ]]; then
@@ -125,12 +127,13 @@ stow_sh::unstow_package() {
 # file/dir (adopt moves it into the package, or force removes it).
 # Symlinks are always relative, computed via realpath -m --relative-to.
 #
-# Usage: stow_sh::__create_link source_path link_path pkg_dir
+# Usage: stow_sh::__create_link source_path link_path pkg_dir target_dir
 # Returns: 0 on success, 1 on unresolvable conflict
 stow_sh::__create_link() {
     local source_path="$1"
     local link_path="$2"
     local pkg_dir="$3"
+    local target_dir="$4"
 
     # Verify source exists
     if [[ ! -e "$source_path" ]]; then
@@ -201,14 +204,14 @@ stow_sh::__create_link() {
             for _unfold_child in "$source_path"/*; do
                 [[ -e "$_unfold_child" ]] || continue
                 local _name="${_unfold_child##*/}"
-                stow_sh::__create_link "$_unfold_child" "$link_path/$_name" "$pkg_dir" || _unfold_had_error=true
+                stow_sh::__create_link "$_unfold_child" "$link_path/$_name" "$pkg_dir" "$target_dir" || _unfold_had_error=true
             done
             # Also handle dotfiles (hidden files/dirs)
             for _unfold_child in "$source_path"/.*; do
                 local _name="${_unfold_child##*/}"
                 [[ "$_name" == "." || "$_name" == ".." ]] && continue
                 [[ -e "$_unfold_child" ]] || continue
-                stow_sh::__create_link "$_unfold_child" "$link_path/$_name" "$pkg_dir" || _unfold_had_error=true
+                stow_sh::__create_link "$_unfold_child" "$link_path/$_name" "$pkg_dir" "$target_dir" || _unfold_had_error=true
             done
             if [[ "$_unfold_had_error" == true ]]; then
                 return 1
@@ -228,6 +231,30 @@ stow_sh::__create_link() {
             mkdir -p "$source_dir"
             mv "$link_path" "$source_path"
         elif stow_sh::is_force; then
+            # Safety guards run BEFORE the dry-run/pre-flight early return, so
+            # an unresolvable --force conflict is caught during pre-flight and
+            # aborts the whole run with zero changes (never half-applied).
+            #
+            # Guard 1: never delete a path that resolves outside the target
+            # directory. link_path is built from target_dir by construction, so
+            # this only trips on a bug or a crafted package — exactly when we
+            # most want to refuse to delete.
+            local _canonical_target _canonical_link_dir
+            _canonical_target="$(readlink -f "$target_dir")"
+            _canonical_link_dir="$(readlink -f "$(dirname "$link_path")")"
+            if [[ "$_canonical_link_dir" != "$_canonical_target" && "$_canonical_link_dir" != "$_canonical_target"/* ]]; then
+                stow_sh::log error "Refusing to force-remove '$link_path': resolves outside target '$target_dir'"
+                return 1
+            fi
+            # Guard 2: never recursively delete a real directory. Auto-unfold
+            # already handles a directory source over a real directory; reaching
+            # here with a real dir means a file would replace a populated
+            # directory. That is a genuine conflict, not something --force
+            # should silently wipe.
+            if [[ -d "$link_path" && ! -L "$link_path" ]]; then
+                stow_sh::log error "Refusing to force-remove real directory: '$link_path' (remove it manually if intended)"
+                return 1
+            fi
             if stow_sh::is_dry_run; then
                 stow_sh::log debug 1 "WOULD remove conflicting path: '$link_path'"
                 stow_sh::report "?" "WOULD force $link_path"
@@ -235,7 +262,7 @@ stow_sh::__create_link() {
             fi
             stow_sh::log debug 1 "Removing conflicting path: '$link_path'"
             stow_sh::report "+" "force $link_path"
-            rm -rf "$link_path"
+            rm -f "$link_path"
         else
             stow_sh::log error "Conflict: '$link_path' already exists (use --adopt or --force)"
             return 1
