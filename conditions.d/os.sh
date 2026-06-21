@@ -1,6 +1,8 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 David Kristiansen
 
+# shellcheck shell=bash
+
 # os — true if the OS name from /etc/os-release matches the argument
 #
 # Reads the NAME= field from /etc/os-release, strips quotes, and

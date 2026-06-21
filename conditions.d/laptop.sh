@@ -1,6 +1,8 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 David Kristiansen
 
+# shellcheck shell=bash
+
 # laptop — true if the system has a battery (portable machine)
 #
 # Checks for /sys/class/power_supply/BAT* which is present on laptops.

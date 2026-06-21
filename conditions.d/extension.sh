@@ -1,6 +1,8 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 David Kristiansen
 
+# shellcheck shell=bash
+
 # extension — always true; preserves file extensions in annotated paths
 #
 # Useful when a file's real extension would be misinterpreted by another

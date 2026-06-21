@@ -1,6 +1,8 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 David Kristiansen
 
+# shellcheck shell=bash
+
 # wsl — true if running inside Windows Subsystem for Linux
 #
 # Checks /proc/version for "microsoft" or "wsl" (case-insensitive).

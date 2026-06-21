@@ -1,6 +1,8 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 David Kristiansen
 
+# shellcheck shell=bash
+
 # conditions.sh — annotation parsing, condition evaluation, and plugin loading
 #
 # Paths can be annotated with conditions using the ## delimiter:

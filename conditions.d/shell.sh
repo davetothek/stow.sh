@@ -1,6 +1,8 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 David Kristiansen
 
+# shellcheck shell=bash
+
 # shell — true if the default shell ($SHELL) matches the argument
 #
 # Compares the basename of $SHELL against the given name. If $SHELL is

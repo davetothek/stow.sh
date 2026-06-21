@@ -1,6 +1,8 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 David Kristiansen
 
+# shellcheck shell=bash
+
 # docker — true if running inside a Docker container
 #
 # Checks for the presence of /.dockerenv, which Docker creates in every
