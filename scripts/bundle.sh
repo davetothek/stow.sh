@@ -19,7 +19,7 @@ OUT="${1:-$ROOT/dist/stow.sh}"
 
 # Module load order mirrors the source block in src/main.sh: every function
 # must be defined before main.sh's logic (appended last) calls it.
-MODULES=(version log args conditions filter scan fold xdg stow)
+MODULES=(version log args conditions filter scan fold xdg dotfiles stow)
 
 VERSION="$(sed -n 's/^STOW_SH_VERSION="\(.*\)"/\1/p' "$ROOT/src/version.sh")"
 

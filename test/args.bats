@@ -25,6 +25,16 @@ parse_no_git() {
     [[ "$(stow_sh::get_force)" == "true" ]]
 }
 
+@test "parse_args: --dotfiles enables dotfiles translation" {
+    parse_no_git --dotfiles -S pkg
+    stow_sh::is_dotfiles
+}
+
+@test "parse_args: dotfiles is off by default" {
+    parse_no_git -S pkg
+    ! stow_sh::is_dotfiles
+}
+
 @test "parse_args: --force sets force mode" {
     parse_no_git --force -S pkg
     [[ "$(stow_sh::get_force)" == "true" ]]

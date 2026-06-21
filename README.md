@@ -29,6 +29,7 @@
 - [Usage](#usage)
   - [Filtering priority](#filtering-priority)
   - [.stowignore](#stowignore)
+- [Dotfiles mode](#dotfiles-mode)
 - [Conditional Dotfiles](#conditional-dotfiles)
   - [Built-in conditions](#built-in-conditions)
   - [Examples](#examples)
@@ -79,6 +80,7 @@ Core symlink-farm management — stow, unstow, restow, directory folding, and
 conflict handling — plus extras aimed at dotfiles:
 
 - Conditional dotfiles via `##` annotations (e.g. `file##os.linux,shell.bash`)
+- GNU Stow-style `--dotfiles` -- keep files un-hidden as `dot-bashrc`, stow them as `.bashrc`
 - Git-aware filtering -- respects `.gitignore` rules including negation patterns
 - Per-package `.stowignore` files for excluding files from stowing
 - Regex (`-i`) and glob (`-I`) ignore patterns on the command line
@@ -94,9 +96,10 @@ stow.sh covers the common dotfiles workflow but is **not** a drop-in
 replacement for every GNU Stow option. Be aware of the following.
 
 **Same idea, same core flags:** `-S`/`-D`/`-R` (stow/delete/restow),
-`-t`/`--target`, `-d`/`--dir`, `--adopt`, `--no-folding`, directory folding,
-and **all-or-nothing conflict handling** — like GNU Stow, stow.sh checks for
-conflicts up front and makes no changes if any are found.
+`-t`/`--target`, `-d`/`--dir`, `--adopt`, `--no-folding`, `--dotfiles`
+(`dot-bashrc` → `.bashrc`), directory folding, and **all-or-nothing conflict
+handling** — like GNU Stow, stow.sh checks for conflicts up front and makes no
+changes if any are found.
 
 **stow.sh adds (not in GNU Stow):** `##` conditional files, git-aware
 filtering (`-g`/`-G`), per-package `.stowignore`, XDG fold barriers
@@ -107,7 +110,6 @@ filtering (`-g`/`-G`), per-package `.stowignore`, XDG fold barriers
 | GNU Stow | Status in stow.sh |
 |----------|-------------------|
 | `-p`/`--compat` (legacy symlink-name handling) | not supported |
-| `--dotfiles` (`dot-bashrc` → `.bashrc` translation) | not supported |
 | `.stow-local-ignore` / `.stow-global-ignore` | use `.stowignore` instead |
 | `--defer` / `--override` (cross-package ownership) | not supported |
 | `-p`-style multiple independent stow dirs in one run | not supported |
@@ -217,6 +219,10 @@ Folding:
   --no-folding              Symlink each file individually
   --no-xdg                  Don't treat XDG directories as fold barriers
 
+Naming:
+  --dotfiles                Translate a leading 'dot-' to '.' per path
+                            component (e.g. dot-bashrc → .bashrc)
+
 Conflict handling:
   -f, --force               Overwrite existing symlinks at the target
   --adopt                   Move existing target files into the package
@@ -251,6 +257,35 @@ bootstrap
 ```
 
 Patterns match against the full relative path, the basename, and every ancestor directory segment.
+
+## Dotfiles mode
+
+With `--dotfiles` (GNU Stow compatible), a package entry whose name begins with
+`dot-` is stowed as if it began with `.`. This lets your dotfiles live
+**un-hidden** in the repository:
+
+```
+~/.dotfiles/
+  dot-bashrc
+  dot-config/
+    nvim/
+      init.lua
+```
+
+```bash
+stow.sh --dotfiles -t ~ ~/.dotfiles
+```
+
+```
+~/.bashrc            ->  .dotfiles/dot-bashrc
+~/.config/nvim       ->  .dotfiles/dot-config/nvim   # (folded; .config stays real under XDG)
+```
+
+The translation is applied **per path component** — `dot-config/dot-foo` links
+as `.config/.foo` — and only to the link name; the package keeps its `dot-`
+names. It composes with `##` annotations (`dot-foo##os.linux` → `.foo` on
+Linux) and respects XDG fold barriers (a `dot-config` package directory maps to
+the `.config` barrier, so it stays a real directory).
 
 ## Conditional Dotfiles
 
