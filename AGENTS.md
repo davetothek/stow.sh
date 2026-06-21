@@ -68,27 +68,31 @@ stow.sh/
 │   ├── wm.sh                #   wm.<name> — alias for exe
 │   └── wsl.sh               #   wsl — /proc/version check
 ├── hooks/
-│   └── commit-msg           # Git hook — validates conventional commit format (install via: make hooks)
+│   ├── commit-msg           # Git hook — validates conventional commit format (install via: make hooks)
+│   └── pre-commit           # Git hook — runs shellcheck + tests before each commit
 ├── test/
-│   ├── args.bats            # Tests for args.sh (45 tests)
-│   ├── conditions.bats      # Tests for conditions, annotations, sanitization, plugins (31 tests)
-│   ├── filter.bats          # Tests for filter.sh (14 tests)
-│   ├── fold.bats            # Tests for fold.sh: folding, barriers, exclusions (24 tests)
-│   ├── integration.bats     # End-to-end tests via bin/stow.sh (64 tests)
+│   ├── args.bats            # Tests for args.sh (43 tests)
+│   ├── conditions.bats      # Tests for conditions, annotations, sanitization, plugins (39 tests)
+│   ├── filter.bats          # Tests for filter.sh (32 tests)
+│   ├── fold.bats            # Tests for fold.sh: folding, barriers, exclusions (33 tests)
+│   ├── integration.bats     # End-to-end tests via bin/stow.sh, incl. atomicity (68 tests)
 │   ├── scan.bats            # Tests for scan.sh (8 tests)
-│   ├── stow.bats            # Tests for stow.sh: stow/unstow operations (27 tests)
+│   ├── stow.bats            # Tests for stow.sh: stow/unstow operations (43 tests)
 │   ├── xdg.bats             # Tests for xdg.sh: XDG barrier computation (10 tests)
 │   └── fixtures/
 │       └── paths.bats       # Fixture: realistic dotfile path list (unused)
+├── scripts/
+│   └── bundle.sh            # Assembles the single-file release executable (make bundle)
 ├── assets/
 │   └── logo.png             # Project logo (transparent PNG)
-├── Makefile                 # install / uninstall / hooks / test / release targets
+├── Makefile                 # install / uninstall / hooks / lint / fmt / bundle / test / release
 ├── CONTRIBUTING.md          # Development setup, architecture, commit conventions
 ├── .github/
 │   └── workflows/
-│       └── release.yml      # CI: test + tarball + GitHub Release on tag push
+│       ├── ci.yml           # CI: lint + tests on every push and pull request
+│       └── release.yml      # CI: lint + test + artifacts (bundle, tarball, checksums) on tag push
 ├── .editorconfig            # shfmt formatting rules (4-space indent)
-└── .gitignore               # Ignores SHOULD_BE_IGNORED/
+└── .gitignore               # Ignores build artifacts (/dist/)
 ```
 
 ## Architecture
@@ -130,6 +134,23 @@ bin/stow.sh  →  sets STOW_ROOT  →  exec src/main.sh "$@"
                                               (evaluate conditions, strip ## annotations,
                                                create/remove symlinks, handle conflicts)
 ```
+
+### Atomic conflict pre-flight
+
+`main()` is all-or-nothing, like GNU Stow. The operation loops live in
+`__apply_operations()`, which `main()` runs **twice**:
+
+1. **Pre-flight** — with `_stow_sh_preflight=true` and `_stow_sh_dry_run=true`,
+   so `__create_link` / `__remove_link` mutate nothing and `stow_sh::report`
+   stays silent, but unresolved conflicts still return non-zero. If any
+   conflict is found, `main()` prints it and exits with **zero changes made**.
+2. **Apply** — only reached if pre-flight was clean; runs for real.
+
+The two `--force` safety guards in `__create_link` (refuse to delete outside
+the target dir, and refuse to recursively delete a real directory) run *before*
+the dry-run early-return, so a `--force` conflict that cannot be resolved is
+also caught during pre-flight rather than half-applied. A user-supplied
+`--dry-run` skips the apply pass entirely.
 
 ### XDG-Aware Folding
 
