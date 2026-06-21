@@ -394,6 +394,11 @@ stow_sh::parse_args() {
         local -a _discovered=()
         while IFS= read -r dir; do
             [[ "$dir" == .* ]] && continue
+            # Under --dotfiles, a dot- directory is hidden content (→ .name),
+            # not a package. Skip it so a repo of only dotfiles self-stows.
+            if stow_sh::is_dotfiles && [[ "$dir" == dot-* ]]; then
+                continue
+            fi
             _discovered+=("$dir")
         done < <(find "$scan_root" -mindepth 1 -maxdepth 1 -type d -printf "%f\n")
 

@@ -1295,6 +1295,24 @@ EOF
     [ "$(readlink -f "$TARGET_DIR/.foo")" = "$(readlink -f "$pkg/dot-foo##exe.bash")" ]
 }
 
+@test "integration: --dotfiles self-stows a repo of only dot- dirs (no flatten)" {
+    # A dotfiles repo whose top level is all dot- dirs must self-stow (translate
+    # contents), NOT treat each dot- dir as a package and flatten it into $HOME.
+    mkdir -p "$SOURCE_DIR/dot-config/nvim"
+    echo "i" > "$SOURCE_DIR/dot-config/nvim/init.lua"
+    echo "rc" > "$SOURCE_DIR/dot-bashrc"
+
+    # No -S / package args → auto-discovery → self-stow fallback.
+    run "$STOW_SH" --dotfiles -G --no-xdg -d "$SOURCE_DIR" -t "$TARGET_DIR"
+    [ "$status" -eq 0 ]
+    # Correct: translated under their hidden parents.
+    [ -e "$TARGET_DIR/.bashrc" ]
+    [ -e "$TARGET_DIR/.config/nvim/init.lua" ] || [ -L "$TARGET_DIR/.config" ] || [ -L "$TARGET_DIR/.config/nvim" ]
+    # Wrong (flattened) outcome must NOT happen:
+    [ ! -e "$TARGET_DIR/nvim" ]
+    [ ! -e "$TARGET_DIR/init.lua" ]
+}
+
 @test "integration: --dotfiles auto-unfold into an existing real .config" {
     local pkg="$SOURCE_DIR/pkg"
     mkdir -p "$pkg/dot-config"
