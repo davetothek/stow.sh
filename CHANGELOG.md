@@ -1,3 +1,9 @@
+## v0.16.1 (2026-06-22)
+
+### Fix
+
+- **fold**: never fold a directory containing a dot- descendant under --dotfiles
+
 ## v0.16.0 (2026-06-22)
 
 ### Feat
