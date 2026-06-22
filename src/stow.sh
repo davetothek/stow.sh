@@ -14,8 +14,9 @@
 # Unstow: for each target, verify the symlink points into the package,
 # remove it, and clean up empty parent directories.
 #
-# Depends on: log.sh, args.sh (is_dry_run, is_force, is_adopt),
-#             conditions.sh (check_conditions, sanitize_path, has_annotation)
+# Depends on: log.sh, args.sh (is_dry_run, is_force, is_adopt, is_dotfiles),
+#             conditions.sh (check_conditions, sanitize_path, has_annotation),
+#             dotfiles.sh (dotfiles_translate)
 
 # Log "Already stowed" at debug level only.
 #
@@ -25,6 +26,20 @@
 # Usage: stow_sh::__log_already_stowed "description"
 stow_sh::__log_already_stowed() {
     stow_sh::log debug 1 "Already stowed: $1"
+}
+
+# Compute the link path (relative to the target dir) for a resolved target.
+#
+# Strips ## annotations, then applies --dotfiles translation (dot- → .).
+# Both steps are no-ops when not applicable, so this is safe for every target.
+#
+# Usage: stow_sh::__link_rel "dot-config##os.linux/init.lua"
+stow_sh::__link_rel() {
+    local target="$1" rel="$1"
+    if stow_sh::has_annotation "$target"; then
+        rel="$(stow_sh::sanitize_path "$target")"
+    fi
+    stow_sh::dotfiles_translate "$rel"
 }
 
 # Stow resolved targets from a package into the target directory.
@@ -61,11 +76,7 @@ stow_sh::stow_package() {
         # Compute source (what the symlink points to) and link path
         local source_path="$pkg_dir/$target"
         local link_rel
-        if stow_sh::has_annotation "$target"; then
-            link_rel="$(stow_sh::sanitize_path "$target")"
-        else
-            link_rel="$target"
-        fi
+        link_rel="$(stow_sh::__link_rel "$target")"
         local link_path="$target_dir/$link_rel"
 
         stow_sh::__create_link "$source_path" "$link_path" "$pkg_dir" "$target_dir" || had_error=true
@@ -99,13 +110,9 @@ stow_sh::unstow_package() {
     for target in "${resolved_targets[@]}"; do
         [[ -z "$target" ]] && continue
 
-        # Compute the link path (with annotation stripping)
+        # Compute the link path (annotation stripping + dotfiles translation)
         local link_rel
-        if stow_sh::has_annotation "$target"; then
-            link_rel="$(stow_sh::sanitize_path "$target")"
-        else
-            link_rel="$target"
-        fi
+        link_rel="$(stow_sh::__link_rel "$target")"
         local link_path="$target_dir/$link_rel"
         local source_path="$pkg_dir/$target"
 
@@ -200,17 +207,18 @@ stow_sh::__create_link() {
             # symlinks (fold); those that do exist recurse into auto-unfold.
             stow_sh::log debug 1 "Auto-unfolding: '$link_path' is a real directory, linking children"
             local _unfold_had_error=false
-            local _unfold_child
+            local _unfold_child _name
             for _unfold_child in "$source_path"/*; do
                 [[ -e "$_unfold_child" ]] || continue
-                local _name="${_unfold_child##*/}"
+                _name="$(stow_sh::dotfiles_translate "${_unfold_child##*/}")"
                 stow_sh::__create_link "$_unfold_child" "$link_path/$_name" "$pkg_dir" "$target_dir" || _unfold_had_error=true
             done
             # Also handle dotfiles (hidden files/dirs)
             for _unfold_child in "$source_path"/.*; do
-                local _name="${_unfold_child##*/}"
+                _name="${_unfold_child##*/}"
                 [[ "$_name" == "." || "$_name" == ".." ]] && continue
                 [[ -e "$_unfold_child" ]] || continue
+                _name="$(stow_sh::dotfiles_translate "$_name")"
                 stow_sh::__create_link "$_unfold_child" "$link_path/$_name" "$pkg_dir" "$target_dir" || _unfold_had_error=true
             done
             if [[ "$_unfold_had_error" == true ]]; then
@@ -320,17 +328,18 @@ stow_sh::__remove_link() {
         if [[ -d "$expected_source" && -d "$link_path" ]]; then
             stow_sh::log debug 1 "Auto-unfolding unstow: '$link_path' is a real directory, removing children"
             local _unfold_had_error=false
-            local _unfold_child
+            local _unfold_child _name
             for _unfold_child in "$expected_source"/*; do
                 [[ -e "$_unfold_child" ]] || continue
-                local _name="${_unfold_child##*/}"
+                _name="$(stow_sh::dotfiles_translate "${_unfold_child##*/}")"
                 stow_sh::__remove_link "$link_path/$_name" "$_unfold_child" "$target_dir" || _unfold_had_error=true
             done
             # Also handle dotfiles (hidden files/dirs)
             for _unfold_child in "$expected_source"/.*; do
-                local _name="${_unfold_child##*/}"
+                _name="${_unfold_child##*/}"
                 [[ "$_name" == "." || "$_name" == ".." ]] && continue
                 [[ -e "$_unfold_child" ]] || continue
+                _name="$(stow_sh::dotfiles_translate "$_name")"
                 stow_sh::__remove_link "$link_path/$_name" "$_unfold_child" "$target_dir" || _unfold_had_error=true
             done
             if [[ "$_unfold_had_error" == true ]]; then

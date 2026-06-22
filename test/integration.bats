@@ -1199,3 +1199,134 @@ EOF
     [ "$status" -eq 1 ]
     [[ "$output" == *"mutually exclusive"* ]]
 }
+
+# ============================================================
+# Dotfiles mode (--dotfiles)
+# ============================================================
+
+@test "integration: --dotfiles links dot-bashrc as .bashrc" {
+    local pkg="$SOURCE_DIR/pkg"
+    mkdir -p "$pkg"
+    echo "rc" > "$pkg/dot-bashrc"
+
+    run "$STOW_SH" --dotfiles -G --no-xdg -d "$SOURCE_DIR" -t "$TARGET_DIR" -S pkg
+    [ "$status" -eq 0 ]
+    [ -L "$TARGET_DIR/.bashrc" ]
+    [ "$(readlink -f "$TARGET_DIR/.bashrc")" = "$(readlink -f "$pkg/dot-bashrc")" ]
+    # The un-translated name must NOT exist at the target.
+    [ ! -e "$TARGET_DIR/dot-bashrc" ]
+}
+
+@test "integration: without --dotfiles, dot- names are left literal" {
+    local pkg="$SOURCE_DIR/pkg"
+    mkdir -p "$pkg"
+    echo "rc" > "$pkg/dot-bashrc"
+
+    run "$STOW_SH" -G --no-xdg -d "$SOURCE_DIR" -t "$TARGET_DIR" -S pkg
+    [ "$status" -eq 0 ]
+    [ -L "$TARGET_DIR/dot-bashrc" ]
+    [ ! -e "$TARGET_DIR/.bashrc" ]
+}
+
+@test "integration: --dotfiles folds a whole dot- directory" {
+    local pkg="$SOURCE_DIR/pkg"
+    mkdir -p "$pkg/dot-vim/colors"
+    echo "v" > "$pkg/dot-vim/vimrc"
+    echo "c" > "$pkg/dot-vim/colors/theme.vim"
+
+    run "$STOW_SH" --dotfiles -G --no-xdg -d "$SOURCE_DIR" -t "$TARGET_DIR" -S pkg
+    [ "$status" -eq 0 ]
+    # Whole directory folds to a single symlink named .vim
+    [ -L "$TARGET_DIR/.vim" ]
+    [ "$(readlink -f "$TARGET_DIR/.vim")" = "$(readlink -f "$pkg/dot-vim")" ]
+}
+
+@test "integration: --dotfiles respects XDG barriers (dot-config → real .config)" {
+    local pkg="$SOURCE_DIR/pkg"
+    mkdir -p "$pkg/dot-config/nvim/lua"
+    echo "init" > "$pkg/dot-config/nvim/init.lua"
+    echo "p" > "$pkg/dot-config/nvim/lua/plugins.lua"
+
+    XDG_CONFIG_HOME="$TARGET_DIR/.config" \
+        run "$STOW_SH" --dotfiles -G -d "$SOURCE_DIR" -t "$TARGET_DIR" -S pkg
+    [ "$status" -eq 0 ]
+    # .config stays a real directory (barrier), nvim folds beneath it.
+    [ -d "$TARGET_DIR/.config" ] && [ ! -L "$TARGET_DIR/.config" ]
+    [ -L "$TARGET_DIR/.config/nvim" ]
+    [ "$(readlink -f "$TARGET_DIR/.config/nvim")" = "$(readlink -f "$pkg/dot-config/nvim")" ]
+}
+
+@test "integration: --dotfiles unstow removes translated links" {
+    local pkg="$SOURCE_DIR/pkg"
+    mkdir -p "$pkg/dot-vim"
+    echo "rc" > "$pkg/dot-bashrc"
+    echo "v" > "$pkg/dot-vim/vimrc"
+
+    "$STOW_SH" --dotfiles -G --no-xdg -d "$SOURCE_DIR" -t "$TARGET_DIR" -S pkg
+    [ -L "$TARGET_DIR/.bashrc" ]
+
+    run "$STOW_SH" --dotfiles -G --no-xdg -d "$SOURCE_DIR" -t "$TARGET_DIR" -D pkg
+    [ "$status" -eq 0 ]
+    [ ! -e "$TARGET_DIR/.bashrc" ]
+    [ ! -e "$TARGET_DIR/.vim" ]
+}
+
+@test "integration: --dotfiles restow refreshes translated links" {
+    local pkg="$SOURCE_DIR/pkg"
+    mkdir -p "$pkg"
+    echo "rc" > "$pkg/dot-bashrc"
+
+    "$STOW_SH" --dotfiles -G --no-xdg -d "$SOURCE_DIR" -t "$TARGET_DIR" -S pkg
+    run "$STOW_SH" --dotfiles -G --no-xdg -d "$SOURCE_DIR" -t "$TARGET_DIR" -R pkg
+    [ "$status" -eq 0 ]
+    [ -L "$TARGET_DIR/.bashrc" ]
+    [ "$(readlink -f "$TARGET_DIR/.bashrc")" = "$(readlink -f "$pkg/dot-bashrc")" ]
+}
+
+@test "integration: --dotfiles with ## annotation strips and translates" {
+    local pkg="$SOURCE_DIR/pkg"
+    mkdir -p "$pkg"
+    # exe.bash is true (bash is on PATH), so this should deploy.
+    echo "x" > "$pkg/dot-foo##exe.bash"
+
+    run "$STOW_SH" --dotfiles -G --no-xdg -d "$SOURCE_DIR" -t "$TARGET_DIR" -S pkg
+    [ "$status" -eq 0 ]
+    [ -L "$TARGET_DIR/.foo" ]
+    [ "$(readlink -f "$TARGET_DIR/.foo")" = "$(readlink -f "$pkg/dot-foo##exe.bash")" ]
+}
+
+@test "integration: --dotfiles self-stows a repo of only dot- dirs (no flatten)" {
+    # A dotfiles repo whose top level is all dot- dirs must self-stow (translate
+    # contents), NOT treat each dot- dir as a package and flatten it into $HOME.
+    mkdir -p "$SOURCE_DIR/dot-config/nvim"
+    echo "i" > "$SOURCE_DIR/dot-config/nvim/init.lua"
+    echo "rc" > "$SOURCE_DIR/dot-bashrc"
+
+    # No -S / package args → auto-discovery → self-stow fallback.
+    run "$STOW_SH" --dotfiles -G --no-xdg -d "$SOURCE_DIR" -t "$TARGET_DIR"
+    [ "$status" -eq 0 ]
+    # Correct: translated under their hidden parents.
+    [ -e "$TARGET_DIR/.bashrc" ]
+    [ -e "$TARGET_DIR/.config/nvim/init.lua" ] || [ -L "$TARGET_DIR/.config" ] || [ -L "$TARGET_DIR/.config/nvim" ]
+    # Wrong (flattened) outcome must NOT happen:
+    [ ! -e "$TARGET_DIR/nvim" ]
+    [ ! -e "$TARGET_DIR/init.lua" ]
+}
+
+@test "integration: --dotfiles auto-unfold into an existing real .config" {
+    local pkg="$SOURCE_DIR/pkg"
+    mkdir -p "$pkg/dot-config"
+    echo "a" > "$pkg/dot-config/aaa"
+    echo "b" > "$pkg/dot-config/bbb"
+    # Pre-existing real .config dir at the target forces auto-unfold.
+    mkdir -p "$TARGET_DIR/.config"
+    echo "keep" > "$TARGET_DIR/.config/existing"
+
+    run "$STOW_SH" --dotfiles -G --no-xdg -d "$SOURCE_DIR" -t "$TARGET_DIR" -S pkg
+    [ "$status" -eq 0 ]
+    # .config stays real; children are individually linked with translated names.
+    [ -d "$TARGET_DIR/.config" ] && [ ! -L "$TARGET_DIR/.config" ]
+    [ -L "$TARGET_DIR/.config/aaa" ]
+    [ -L "$TARGET_DIR/.config/bbb" ]
+    [ -f "$TARGET_DIR/.config/existing" ] && [ ! -L "$TARGET_DIR/.config/existing" ]
+}

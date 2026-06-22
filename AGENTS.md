@@ -54,6 +54,7 @@ stow.sh/
 │   ├── fold.sh              # Directory folding + target resolution (annotation + barrier + exclusion aware)
 │   ├── stow.sh              # Stow/unstow operations (symlink creation/removal, conflict handling, auto-unfold)
 │   ├── xdg.sh               # XDG fold barrier detection from environment variables
+│   ├── dotfiles.sh          # --dotfiles name translation (dot- ↔ . per path component)
 │   ├── conditions.sh        # Annotation parsing, condition evaluation, plugin loader
 │   └── version.sh           # Version constant (managed by `make release`)
 ├── conditions.d/            # Built-in condition predicates (loaded as plugins)
@@ -71,11 +72,12 @@ stow.sh/
 │   ├── commit-msg           # Git hook — validates conventional commit format (install via: make hooks)
 │   └── pre-commit           # Git hook — runs shellcheck + tests before each commit
 ├── test/
-│   ├── args.bats            # Tests for args.sh (43 tests)
+│   ├── args.bats            # Tests for args.sh (45 tests)
 │   ├── conditions.bats      # Tests for conditions, annotations, sanitization, plugins (39 tests)
+│   ├── dotfiles.bats        # Tests for dotfiles.sh: dot- ↔ . translation (12 tests)
 │   ├── filter.bats          # Tests for filter.sh (32 tests)
 │   ├── fold.bats            # Tests for fold.sh: folding, barriers, exclusions (33 tests)
-│   ├── integration.bats     # End-to-end tests via bin/stow.sh, incl. atomicity (68 tests)
+│   ├── integration.bats     # End-to-end tests via bin/stow.sh, incl. atomicity + dotfiles (76 tests)
 │   ├── scan.bats            # Tests for scan.sh (8 tests)
 │   ├── stow.bats            # Tests for stow.sh: stow/unstow operations (43 tests)
 │   ├── xdg.bats             # Tests for xdg.sh: XDG barrier computation (10 tests)
@@ -282,7 +284,8 @@ main.sh
   ├── scan.sh       (scanning — calls log.sh)
   ├── fold.sh       (folding — calls log.sh, calls conditions.sh for annotation detection)
   ├── xdg.sh        (XDG barriers — calls log.sh, reads XDG_* env vars)
-  └── stow.sh       (stow/unstow ops — calls log.sh, args.sh, conditions.sh)
+  ├── dotfiles.sh   (--dotfiles name translation — calls args.sh state)
+  └── stow.sh       (stow/unstow ops — calls log.sh, args.sh, conditions.sh, dotfiles.sh)
 ```
 
 ### Naming Conventions

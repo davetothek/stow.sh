@@ -26,6 +26,7 @@ _stow_sh_dry_run=false
 _stow_sh_preflight=false
 _stow_sh_color_mode="auto"
 _stow_sh_adopt=false
+_stow_sh_dotfiles=false
 _stow_sh_no_folding=false
 _stow_sh_xdg_mode=true
 _stow_sh_git_mode="auto"  # auto, true, false
@@ -64,6 +65,7 @@ stow_sh::is_xdg_mode() { [[ "${_stow_sh_xdg_mode:-true}" == true ]]; }
 stow_sh::is_dry_run() { [[ "${_stow_sh_dry_run:-false}" == true ]]; }
 stow_sh::is_force() { [[ "${_stow_sh_force:-false}" == true ]]; }
 stow_sh::is_adopt() { [[ "${_stow_sh_adopt:-false}" == true ]]; }
+stow_sh::is_dotfiles() { [[ "${_stow_sh_dotfiles:-false}" == true ]]; }
 stow_sh::is_preflight() { [[ "${_stow_sh_preflight:-false}" == true ]]; }
 
 # Print usage information and exit.
@@ -121,6 +123,11 @@ Folding:
                             symlinking entire directories when possible
   --no-xdg                  Don't treat XDG directories (e.g. ~/.config)
                             as fold barriers
+
+Naming:
+  --dotfiles                Translate a leading 'dot-' to '.' per path
+                            component (e.g. dot-bashrc → .bashrc). Lets
+                            dotfiles live un-hidden in the package.
 
 Conflict handling:
   -f, --force               Overwrite existing symlinks at the target
@@ -286,6 +293,11 @@ stow_sh::parse_args() {
                 stow_sh::log debug 2 "Enabled adopt mode"
                 shift
                 ;;
+            --dotfiles)
+                _stow_sh_dotfiles=true
+                stow_sh::log debug 2 "Enabled dotfiles name translation"
+                shift
+                ;;
             --no-folding)
                 _stow_sh_no_folding=true
                 stow_sh::log debug 2 "Disabled folding"
@@ -382,6 +394,11 @@ stow_sh::parse_args() {
         local -a _discovered=()
         while IFS= read -r dir; do
             [[ "$dir" == .* ]] && continue
+            # Under --dotfiles, a dot- directory is hidden content (→ .name),
+            # not a package. Skip it so a repo of only dotfiles self-stows.
+            if stow_sh::is_dotfiles && [[ "$dir" == dot-* ]]; then
+                continue
+            fi
             _discovered+=("$dir")
         done < <(find "$scan_root" -mindepth 1 -maxdepth 1 -type d -printf "%f\n")
 

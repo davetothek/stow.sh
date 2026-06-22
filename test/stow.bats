@@ -8,6 +8,7 @@ setup() {
     source "$BATS_TEST_DIRNAME/../src/log.sh"
     source "$BATS_TEST_DIRNAME/../src/args.sh"
     source "$BATS_TEST_DIRNAME/../src/conditions.sh"
+    source "$BATS_TEST_DIRNAME/../src/dotfiles.sh"
     source "$BATS_TEST_DIRNAME/../src/stow.sh"
 
     # Load built-in condition plugins

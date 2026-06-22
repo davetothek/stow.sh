@@ -25,6 +25,7 @@ source "$ROOT/src/filter.sh"
 source "$ROOT/src/scan.sh"
 source "$ROOT/src/fold.sh"
 source "$ROOT/src/xdg.sh"
+source "$ROOT/src/dotfiles.sh"
 source "$ROOT/src/stow.sh"
 
 # Load condition plugins (built-ins + user overrides)
@@ -253,7 +254,9 @@ main() {
         mapfile -t xdg_barriers < <(stow_sh::compute_xdg_barriers "$target_dir")
         local b
         for b in "${xdg_barriers[@]}"; do
-            [[ -n "$b" ]] && _stow_sh_barrier_flags+=("--barrier=$b")
+            # Barriers are target-relative (e.g. ".config"); map them onto the
+            # package directory that holds them ("dot-config") under --dotfiles.
+            [[ -n "$b" ]] && _stow_sh_barrier_flags+=("--barrier=$(stow_sh::dotfiles_untranslate "$b")")
         done
         if [[ ${#_stow_sh_barrier_flags[@]} -gt 0 ]]; then
             stow_sh::log debug 1 "XDG fold barriers: ${xdg_barriers[*]}"
