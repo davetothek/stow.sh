@@ -287,6 +287,10 @@ names. It composes with `##` annotations (`dot-foo##os.linux` → `.foo` on
 Linux) and respects XDG fold barriers (a `dot-config` package directory maps to
 the `.config` barrier, so it stays a real directory).
 
+A directory that *contains* a `dot-` entry is never folded into a single
+symlink (folding would expose the raw `dot-` name), so its `dot-` children are
+always linked individually and translated correctly.
+
 ## Conditional Dotfiles
 
 Annotate files and directories with `##` followed by conditions. Conditions are evaluated at stow time; the annotation is stripped from the symlink name.

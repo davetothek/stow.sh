@@ -31,7 +31,8 @@
 # a barrier are also protected — if .local/share is a barrier, .local
 # cannot be folded either (it must remain a real directory).
 #
-# Depends on: log.sh, conditions.sh (for stow_sh::has_annotation)
+# Depends on: log.sh, conditions.sh (for stow_sh::has_annotation),
+#             args.sh (for stow_sh::is_dotfiles)
 
 # Pure-bash dirname: sets _dir to the parent of $1, or "." if no slash.
 # Avoids forking a subprocess — critical for performance in tight loops.
@@ -222,25 +223,32 @@ stow_sh::fold_targets() {
         fi
     done
 
-    # --- Taint pass: mark dirs with ## annotated descendants ---
+    # --- Taint pass: mark dirs whose contents must not be exposed raw ---
     #
-    # An annotated directory (e.g. dir##cond/) CAN be a fold point — its
-    # condition is evaluated at stow time and the link name is sanitized.
-    # Only ancestors ABOVE the deepest annotated segment are tainted,
-    # because folding them would expose the raw ## name.
+    # Folding a directory makes one symlink to it, so its contents are served
+    # with their literal package names. A segment is "fold-opaque" if those
+    # raw names would be wrong in the target:
+    #   * a ## annotation (sanitized + condition-gated at stow time), or
+    #   * (under --dotfiles) a dot- prefix (translated to "." at stow time).
+    # Such a segment CAN itself be a fold point (the link name is fixed up),
+    # but ancestors ABOVE the deepest opaque segment must not fold — folding
+    # them would expose the raw ## / dot- name.
     #
-    # Algorithm: for each annotated candidate, find the deepest ##-bearing
-    # path segment. Start tainting from that segment's parent upward.
+    # Algorithm: for each candidate, find the deepest fold-opaque segment and
+    # taint from its parent upward.
+    local _dotfiles_fold=false
+    stow_sh::is_dotfiles && _dotfiles_fold=true
+
     local -A tainted_dirs
     for candidate in "${candidates[@]}"; do
-        if [[ "$candidate" == *"##"* ]]; then
-            # Find the deepest ## segment by walking segments right-to-left.
+        if [[ "$candidate" == *"##"* ]] || { [[ "$_dotfiles_fold" == true ]] && [[ "$candidate" == *dot-* ]]; }; then
+            # Find the deepest fold-opaque segment (right-to-left).
             local -a segs
             IFS='/' read -r -a segs <<< "$candidate"
             local deepest_idx=-1
             local i
             for (( i = ${#segs[@]} - 1; i >= 0; i-- )); do
-                if [[ "${segs[i]}" == *"##"* ]]; then
+                if [[ "${segs[i]}" == *"##"* ]] || { [[ "$_dotfiles_fold" == true ]] && [[ "${segs[i]}" == dot-* ]]; }; then
                     deepest_idx=$i
                     break
                 fi
@@ -257,10 +265,10 @@ stow_sh::fold_targets() {
                     fi
                 done
 
-                stow_sh::log debug 3 "Annotation in '$candidate' (deepest: '${segs[deepest_idx]}') — tainting above '$annotated_path'"
+                stow_sh::log debug 3 "Fold-opaque segment in '$candidate' (deepest: '${segs[deepest_idx]}') — tainting above '$annotated_path'"
 
-                # Taint from the PARENT of the annotated segment upward.
-                # The annotated segment itself is a valid fold candidate.
+                # Taint from the PARENT of the opaque segment upward.
+                # The opaque segment itself is a valid fold candidate.
                 stow_sh::__parent_of "$annotated_path"
                 dir="$_dir"
                 while [[ "$dir" != "." && "$dir" != "/" && "$dir" != "$pkg_root" ]]; do

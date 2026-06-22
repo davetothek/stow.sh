@@ -1313,6 +1313,23 @@ EOF
     [ ! -e "$TARGET_DIR/init.lua" ]
 }
 
+@test "integration: --dotfiles never folds a dir containing a dot- file" {
+    # Regression: folding a dir with a dot- entry would expose the raw
+    # 'dot-yamlfmt' name instead of translating it to '.yamlfmt'.
+    local pkg="$SOURCE_DIR/pkg"
+    mkdir -p "$pkg/dot-config/yamlfmt"
+    echo "y" > "$pkg/dot-config/yamlfmt/dot-yamlfmt"
+
+    run "$STOW_SH" --dotfiles -G --no-xdg -d "$SOURCE_DIR" -t "$TARGET_DIR" -S pkg
+    [ "$status" -eq 0 ]
+    # Correct translated path exists as a symlink...
+    [ -L "$TARGET_DIR/.config/yamlfmt/.yamlfmt" ]
+    [ "$(readlink -f "$TARGET_DIR/.config/yamlfmt/.yamlfmt")" = "$(readlink -f "$pkg/dot-config/yamlfmt/dot-yamlfmt")" ]
+    # ...and the raw dot- name must NOT leak into the target anywhere.
+    [ ! -e "$TARGET_DIR/.config/yamlfmt/dot-yamlfmt" ]
+    [ -z "$(find "$TARGET_DIR" -name 'dot-*' 2>/dev/null)" ]
+}
+
 @test "integration: --dotfiles auto-unfold into an existing real .config" {
     local pkg="$SOURCE_DIR/pkg"
     mkdir -p "$pkg/dot-config"

@@ -4,6 +4,7 @@
 
 setup() {
     source "$BATS_TEST_DIRNAME/../src/log.sh"
+    source "$BATS_TEST_DIRNAME/../src/args.sh"
     source "$BATS_TEST_DIRNAME/../src/conditions.sh"
     source "$BATS_TEST_DIRNAME/../src/fold.sh"
 
@@ -597,6 +598,55 @@ fold_all() {
     mkdir -p "$TEST_PKG/a/empty"
 
     run stow_sh::fold_targets "$TEST_PKG" -- "a/f1" "a/f2"
+    [ "$status" -eq 0 ]
+    local lines
+    mapfile -t lines <<< "$output"
+    [ "${#lines[@]}" -eq 1 ]
+    [ "${lines[0]}" = "a" ]
+}
+
+# =============================================================================
+# Dotfiles fold-taint (--dotfiles): never fold a dir containing a dot- descendant
+# =============================================================================
+
+@test "fold (dotfiles): dir with a dot- file inside is NOT folded" {
+    _stow_sh_dotfiles=true
+    # 'a' contains a dot- file; folding 'a' would expose 'dot-x' raw.
+    run fold_all "a/dot-x" "a/y"
+    [ "$status" -eq 0 ]
+    local lines
+    mapfile -t lines <<< "$output"
+    # 'a' must NOT be a fold point; the dot- file appears as an individual target.
+    local l found_a=false
+    for l in "${lines[@]}"; do [[ "$l" == "a" ]] && found_a=true; done
+    [ "$found_a" = false ]
+    [[ "$output" == *"a/dot-x"* ]]
+}
+
+@test "fold (dotfiles): a dot- dir with no dot- descendants CAN fold" {
+    _stow_sh_dotfiles=true
+    run fold_all "dot-vim/vimrc" "dot-vim/colors/scheme"
+    [ "$status" -eq 0 ]
+    # dot-vim itself is opaque but its contents are clean → foldable to one point.
+    local lines
+    mapfile -t lines <<< "$output"
+    [ "${#lines[@]}" -eq 1 ]
+    [ "${lines[0]}" = "dot-vim" ]
+}
+
+@test "fold (dotfiles): taints only ancestors above the deepest dot- segment" {
+    _stow_sh_dotfiles=true
+    run fold_all "dot-config/dot-foo/bar" "dot-config/dot-foo/baz"
+    [ "$status" -eq 0 ]
+    # dot-config can't fold (dot-foo below), but dot-foo can (bar/baz are clean).
+    [[ "$output" == *"dot-config/dot-foo"* ]]
+    [[ "$output" != *"dot-config/dot-foo/bar"* ]]
+}
+
+@test "fold (no dotfiles): dot- names are literal and fold normally" {
+    _stow_sh_dotfiles=false
+    # Without --dotfiles, 'dot-x' is just a filename; 'a' folds as usual.
+    run fold_all "a/dot-x" "a/y"
     [ "$status" -eq 0 ]
     local lines
     mapfile -t lines <<< "$output"
