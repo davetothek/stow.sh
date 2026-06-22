@@ -1,3 +1,13 @@
+## v0.16.0 (2026-06-22)
+
+### Feat
+
+- **cli**: add --dotfiles for GNU Stow-style name translation
+
+### Fix
+
+- **args**: skip dot- dirs in auto-discovery under --dotfiles
+
 ## v0.15.0 (2026-06-21)
 
 ### BREAKING CHANGE

@@ -10,4 +10,4 @@
 
 # Read by args.sh (--version / --help). shellcheck can't see cross-module use.
 # shellcheck disable=SC2034
-STOW_SH_VERSION="0.15.0"
+STOW_SH_VERSION="0.16.0"
