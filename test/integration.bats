@@ -467,6 +467,25 @@ teardown() {
     [ "$(cat "$pkg/.bashrc")" = "custom-content" ]
 }
 
+@test "integration: adopt with same package listed twice stays consistent" {
+    # Exercises the resolve-cache invalidation in __apply_operations:
+    # adoption mutates the package, so a second operation on the same
+    # package must re-resolve it fresh. Outcome-wise stale and fresh
+    # currently coincide (conflicting unstows abort in pre-flight before
+    # any adoption), so this pins that the invalidation path executes
+    # and the run stays idempotent and consistent.
+    local pkg="$SOURCE_DIR/pkg"
+    mkdir -p "$pkg"
+    echo "placeholder" > "$pkg/.bashrc"
+    echo "custom-content" > "$TARGET_DIR/.bashrc"
+
+    run "$STOW_SH" -G --no-xdg --adopt -d "$SOURCE_DIR" -t "$TARGET_DIR" -S pkg pkg
+    [ "$status" -eq 0 ]
+    [ -L "$TARGET_DIR/.bashrc" ]
+    [ "$(cat "$pkg/.bashrc")" = "custom-content" ]
+    [ "$(cat "$TARGET_DIR/.bashrc")" = "custom-content" ]
+}
+
 # ============================================================
 # Multiple packages
 # ============================================================
