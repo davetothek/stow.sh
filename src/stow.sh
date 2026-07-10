@@ -100,9 +100,11 @@ stow_sh::__link_rel() {
     _stow_sh_link_rel="$target"
     if stow_sh::has_annotation "$target"; then
         stow_sh::__sanitize_path_var "$target"
+        # shellcheck disable=SC2154  # set by __sanitize_path_var (conditions.sh)
         _stow_sh_link_rel="$_stow_sh_sanitized"
     fi
     stow_sh::__dotfiles_translate_var "$_stow_sh_link_rel"
+    # shellcheck disable=SC2154  # set by __dotfiles_translate_var (dotfiles.sh)
     _stow_sh_link_rel="$_stow_sh_dtrans"
 }
 
