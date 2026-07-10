@@ -1,3 +1,10 @@
+## v0.17.0 (2026-07-10)
+
+### Perf
+
+- **main**: memoize package resolution across pre-flight and apply
+- **stow**: eliminate subprocess forks from per-target hot paths
+
 ## v0.16.1 (2026-06-22)
 
 ### Fix
