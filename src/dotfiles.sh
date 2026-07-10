@@ -23,27 +23,38 @@
 #
 # Depends on: args.sh (is_dotfiles)
 
-# Translate a package-relative path to its link name (dot- → .).
+# Var-returning core for dotfiles_translate: sets _stow_sh_dtrans.
 #
-# Usage: stow_sh::dotfiles_translate "dot-config/nvim"
-# Output: ".config/nvim"
-stow_sh::dotfiles_translate() {
-    local path="$1"
-    stow_sh::is_dotfiles || {
-        printf '%s' "$path"
-        return 0
-    }
+# Avoids the subshell fork of $(dotfiles_translate ...) — critical in the
+# per-target hot loops of stow/unstow.
+#
+# Usage: stow_sh::__dotfiles_translate_var "dot-config/nvim"
+#        echo "$_stow_sh_dtrans"
+stow_sh::__dotfiles_translate_var() {
+    _stow_sh_dtrans="$1"
+    stow_sh::is_dotfiles || return 0
+    # Fast path: nothing to translate
+    [[ "$_stow_sh_dtrans" == *dot-* ]] || return 0
 
     local -a segs
     local IFS='/'
-    read -r -a segs <<< "$path"
+    read -r -a segs <<< "$_stow_sh_dtrans"
 
     local out="" seg
     for seg in "${segs[@]}"; do
         [[ "$seg" == dot-* ]] && seg=".${seg#dot-}"
         out+="$seg/"
     done
-    printf '%s' "${out%/}"
+    _stow_sh_dtrans="${out%/}"
+}
+
+# Translate a package-relative path to its link name (dot- → .).
+#
+# Usage: stow_sh::dotfiles_translate "dot-config/nvim"
+# Output: ".config/nvim"
+stow_sh::dotfiles_translate() {
+    stow_sh::__dotfiles_translate_var "$1"
+    printf '%s' "$_stow_sh_dtrans"
 }
 
 # Translate a link-relative path back to its package name (. → dot-).

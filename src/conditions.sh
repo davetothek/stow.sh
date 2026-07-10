@@ -111,22 +111,33 @@ stow_sh::extract_conditions() {
     fi
 }
 
-# Strip ## annotations from every segment of a full path.
+# Var-returning core for sanitize_path: sets _stow_sh_sanitized.
 #
-# Usage: stow_sh::sanitize_path "foo##os.linux/bar##wm.sway"
-# Output: "foo/bar"
-stow_sh::sanitize_path() {
+# Avoids the subshell fork of $(sanitize_path ...) in per-target hot loops.
+#
+# Usage: stow_sh::__sanitize_path_var "foo##os.linux/bar##wm.sway"
+#        echo "$_stow_sh_sanitized"
+stow_sh::__sanitize_path_var() {
     local path="$1"
     local sanitized=""
     local token
+    local -a parts
 
     IFS='/' read -ra parts <<< "$path"
     for token in "${parts[@]}"; do
         sanitized+="${token%%##*}/"
     done
-    sanitized="${sanitized%/}"
-    stow_sh::log debug 3 "Sanitized '$path' → '$sanitized'"
-    echo "$sanitized"
+    _stow_sh_sanitized="${sanitized%/}"
+}
+
+# Strip ## annotations from every segment of a full path.
+#
+# Usage: stow_sh::sanitize_path "foo##os.linux/bar##wm.sway"
+# Output: "foo/bar"
+stow_sh::sanitize_path() {
+    stow_sh::__sanitize_path_var "$1"
+    stow_sh::log debug 3 "Sanitized '$1' → '$_stow_sh_sanitized'"
+    echo "$_stow_sh_sanitized"
 }
 
 # --- Condition Evaluation ---

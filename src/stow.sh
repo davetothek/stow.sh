@@ -18,6 +18,25 @@
 #             conditions.sh (check_conditions, sanitize_path, has_annotation),
 #             dotfiles.sh (dotfiles_translate)
 
+# Cache of symlink contents (link_path → readlink output). The conflict
+# pre-flight and the apply pass read the same links; caching halves the
+# readlink forks. Entries are invalidated whenever a link is removed.
+declare -gA _stow_sh_readlink_cache=()
+
+# Read a symlink's content (raw, not canonicalized) through the cache.
+# Sets _stow_sh_readlink.
+#
+# Usage: stow_sh::__readlink_cached /path/to/symlink
+stow_sh::__readlink_cached() {
+    local p="$1"
+    if [[ -n "${_stow_sh_readlink_cache[$p]+x}" ]]; then
+        _stow_sh_readlink="${_stow_sh_readlink_cache[$p]}"
+    else
+        _stow_sh_readlink="$(readlink "$p")"
+        _stow_sh_readlink_cache["$p"]="$_stow_sh_readlink"
+    fi
+}
+
 # Log "Already stowed" at debug level only.
 #
 # This is not reported to stdout — it's not actionable information.
@@ -28,18 +47,63 @@ stow_sh::__log_already_stowed() {
     stow_sh::log debug 1 "Already stowed: $1"
 }
 
+# Pure-bash dirname: sets _stow_sh_dir to the parent of $1.
+#
+# Handles absolute and relative paths: "/a/b" → "/a", "/a" → "/", "a/b" → "a",
+# "a" → ".". Avoids forking a subprocess — critical in per-target hot loops.
+#
+# Usage: stow_sh::__dir_of "/path/to/file"
+#        echo "$_stow_sh_dir"
+stow_sh::__dir_of() {
+    local p="$1"
+    if [[ "$p" == */* ]]; then
+        p="${p%/*}"
+        _stow_sh_dir="${p:-/}"
+    else
+        _stow_sh_dir="."
+    fi
+}
+
+# Pure-bash relative path: sets _stow_sh_rel to the path of $2 relative to
+# directory $1. Equivalent to `realpath -m --relative-to="$1" "$2"` when both
+# inputs are canonical absolute paths (no symlink components, no . or ..).
+#
+# Callers must fall back to realpath when a path component may be a symlink
+# (textual and canonical parents diverge there).
+#
+# Usage: stow_sh::__relpath "/home/u/target/.config" "/home/u/pkgs/big/file"
+#        echo "$_stow_sh_rel"   # → "../../pkgs/big/file"
+stow_sh::__relpath() {
+    local from="${1%/}" to="${2%/}"
+    local up=""
+    while [[ "$to" != "$from" && "$to" != "$from"/* ]]; do
+        up+="../"
+        from="${from%/*}"
+        [[ -z "$from" ]] && from="/"
+    done
+    local rest="${to#"$from"}"
+    rest="${rest#/}"
+    local rel="${up}${rest}"
+    _stow_sh_rel="${rel:-.}"
+}
+
 # Compute the link path (relative to the target dir) for a resolved target.
+# Sets _stow_sh_link_rel (var-returning to avoid a subshell per target).
 #
 # Strips ## annotations, then applies --dotfiles translation (dot- → .).
 # Both steps are no-ops when not applicable, so this is safe for every target.
 #
 # Usage: stow_sh::__link_rel "dot-config##os.linux/init.lua"
+#        echo "$_stow_sh_link_rel"
 stow_sh::__link_rel() {
-    local target="$1" rel="$1"
+    local target="$1"
+    _stow_sh_link_rel="$target"
     if stow_sh::has_annotation "$target"; then
-        rel="$(stow_sh::sanitize_path "$target")"
+        stow_sh::__sanitize_path_var "$target"
+        _stow_sh_link_rel="$_stow_sh_sanitized"
     fi
-    stow_sh::dotfiles_translate "$rel"
+    stow_sh::__dotfiles_translate_var "$_stow_sh_link_rel"
+    _stow_sh_link_rel="$_stow_sh_dtrans"
 }
 
 # Stow resolved targets from a package into the target directory.
@@ -75,9 +139,8 @@ stow_sh::stow_package() {
 
         # Compute source (what the symlink points to) and link path
         local source_path="$pkg_dir/$target"
-        local link_rel
-        link_rel="$(stow_sh::__link_rel "$target")"
-        local link_path="$target_dir/$link_rel"
+        stow_sh::__link_rel "$target"
+        local link_path="$target_dir/$_stow_sh_link_rel"
 
         stow_sh::__create_link "$source_path" "$link_path" "$pkg_dir" "$target_dir" || had_error=true
     done
@@ -104,6 +167,10 @@ stow_sh::unstow_package() {
     # Prevents duplicate reports when multiple files share the same ancestor fold point.
     declare -gA _stow_sh_handled_ancestors=()
 
+    # Canonicalize the target dir once per package — __remove_link needs it
+    # for its cleanup loop and would otherwise fork readlink per target.
+    _stow_sh_canon_target="$(readlink -f "$target_dir")"
+
     stow_sh::log debug 1 "Unstowing ${#resolved_targets[@]} targets from '$pkg_dir' out of '$target_dir'"
 
     local target
@@ -111,9 +178,8 @@ stow_sh::unstow_package() {
         [[ -z "$target" ]] && continue
 
         # Compute the link path (annotation stripping + dotfiles translation)
-        local link_rel
-        link_rel="$(stow_sh::__link_rel "$target")"
-        local link_path="$target_dir/$link_rel"
+        stow_sh::__link_rel "$target"
+        local link_path="$target_dir/$_stow_sh_link_rel"
         local source_path="$pkg_dir/$target"
 
         stow_sh::__remove_link "$link_path" "$source_path" "$target_dir" || had_error=true
@@ -149,15 +215,26 @@ stow_sh::__create_link() {
     fi
 
     local link_dir
-    link_dir="$(dirname "$link_path")"
+    stow_sh::__dir_of "$link_path"
+    link_dir="$_stow_sh_dir"
 
     # Check if an ancestor directory is already a symlink pointing into the
     # package. This happens when a previous stow created a directory symlink
     # (fold point) but the current run resolves individual files instead
     # (e.g. due to filter changes). The files are effectively "already stowed"
     # through the ancestor directory symlink.
+    #
+    # The walk is bounded at target_dir: link_path is constructed as
+    # "$target_dir/...", and any fold point stow created lives below it.
+    # target_dir itself is canonical (realpath at setup), so no ancestor
+    # of it can be a symlink.
+    #
+    # A symlink ancestor pointing elsewhere (e.g. a user's ~/.config →
+    # /somewhere) is recorded — it disables the pure-bash relative-path
+    # fast path below, since textual and canonical parents diverge there.
+    local _symlink_ancestor=false
     local _check_dir="$link_dir"
-    while [[ "$_check_dir" != "/" ]]; do
+    while [[ "$_check_dir" != "$target_dir" && "$_check_dir" != "/" ]]; do
         if [[ -L "$_check_dir" ]]; then
             local _ancestor_target
             _ancestor_target="$(readlink -f "$_check_dir")"
@@ -166,13 +243,39 @@ stow_sh::__create_link() {
                 stow_sh::__log_already_stowed "'$link_path' (via directory symlink at '$_check_dir')"
                 return 0
             fi
+            _symlink_ancestor=true
         fi
-        _check_dir="$(dirname "$_check_dir")"
+        stow_sh::__dir_of "$_check_dir"
+        _check_dir="$_stow_sh_dir"
     done
+
+    # Compute the relative path from the link's parent directory to the
+    # source. Pure bash on the fast path (all inputs canonical, no symlink
+    # ancestors); realpath only when a symlinked ancestor makes textual
+    # and canonical paths diverge.
+    local rel_source
+    if [[ "$_symlink_ancestor" == false ]]; then
+        stow_sh::__relpath "$link_dir" "$source_path"
+        rel_source="$_stow_sh_rel"
+    else
+        rel_source="$(realpath -m --relative-to="$link_dir" "$source_path")"
+    fi
 
     # Check for conflicts at the link path
     if [[ -L "$link_path" ]]; then
-        # It's a symlink — check where it points
+        # It's a symlink — check where it points. Fast path: the link
+        # content matches exactly what we would create (the common case on
+        # a repeated stow) — no canonicalization forks needed.
+        local existing_raw
+        stow_sh::__readlink_cached "$link_path"
+        existing_raw="$_stow_sh_readlink"
+        if [[ "$existing_raw" == "$rel_source" ]]; then
+            stow_sh::__log_already_stowed "'$link_path'"
+            return 0
+        fi
+
+        # Slow path: canonical comparison catches equivalent links written
+        # differently (e.g. absolute, or via a different relative route).
         local existing_target
         existing_target="$(readlink -f "$link_path")"
         local canonical_source
@@ -186,15 +289,16 @@ stow_sh::__create_link() {
         # Points elsewhere — conflict
         if stow_sh::is_force; then
             if stow_sh::is_dry_run; then
-                stow_sh::log debug 1 "WOULD remove conflicting symlink: '$link_path' -> '$(readlink "$link_path")'"
+                stow_sh::log debug 1 "WOULD remove conflicting symlink: '$link_path' -> '$existing_raw'"
                 stow_sh::report "?" "WOULD force $link_path"
                 return 0
             fi
             stow_sh::log debug 1 "Removing conflicting symlink: '$link_path'"
-            stow_sh::report "+" "force $link_path (was -> $(readlink "$link_path"))"
+            stow_sh::report "+" "force $link_path (was -> $existing_raw)"
             rm "$link_path"
+            unset '_stow_sh_readlink_cache[$link_path]'
         else
-            stow_sh::log error "Conflict: '$link_path' is a symlink to '$(readlink "$link_path")' (use --force to override)"
+            stow_sh::log error "Conflict: '$link_path' is a symlink to '$existing_raw' (use --force to override)"
             return 1
         fi
     elif [[ -e "$link_path" ]]; then
@@ -210,7 +314,8 @@ stow_sh::__create_link() {
             local _unfold_child _name
             for _unfold_child in "$source_path"/*; do
                 [[ -e "$_unfold_child" ]] || continue
-                _name="$(stow_sh::dotfiles_translate "${_unfold_child##*/}")"
+                stow_sh::__dotfiles_translate_var "${_unfold_child##*/}"
+                _name="$_stow_sh_dtrans"
                 stow_sh::__create_link "$_unfold_child" "$link_path/$_name" "$pkg_dir" "$target_dir" || _unfold_had_error=true
             done
             # Also handle dotfiles (hidden files/dirs)
@@ -218,7 +323,8 @@ stow_sh::__create_link() {
                 _name="${_unfold_child##*/}"
                 [[ "$_name" == "." || "$_name" == ".." ]] && continue
                 [[ -e "$_unfold_child" ]] || continue
-                _name="$(stow_sh::dotfiles_translate "$_name")"
+                stow_sh::__dotfiles_translate_var "$_name"
+                _name="$_stow_sh_dtrans"
                 stow_sh::__create_link "$_unfold_child" "$link_path/$_name" "$pkg_dir" "$target_dir" || _unfold_had_error=true
             done
             if [[ "$_unfold_had_error" == true ]]; then
@@ -235,7 +341,8 @@ stow_sh::__create_link() {
             stow_sh::report "+" "adopt $link_path -> $source_path"
             # Move the existing file into the package, then symlink
             local source_dir
-            source_dir="$(dirname "$source_path")"
+            stow_sh::__dir_of "$source_path"
+            source_dir="$_stow_sh_dir"
             mkdir -p "$source_dir"
             mv "$link_path" "$source_path"
         elif stow_sh::is_force; then
@@ -249,7 +356,7 @@ stow_sh::__create_link() {
             # most want to refuse to delete.
             local _canonical_target _canonical_link_dir
             _canonical_target="$(readlink -f "$target_dir")"
-            _canonical_link_dir="$(readlink -f "$(dirname "$link_path")")"
+            _canonical_link_dir="$(readlink -f "$link_dir")"
             if [[ "$_canonical_link_dir" != "$_canonical_target" && "$_canonical_link_dir" != "$_canonical_target"/* ]]; then
                 stow_sh::log error "Refusing to force-remove '$link_path': resolves outside target '$target_dir'"
                 return 1
@@ -287,11 +394,8 @@ stow_sh::__create_link() {
         fi
     fi
 
-    # Compute relative path from link's parent directory to source
-    local rel_source
-    rel_source="$(realpath -m --relative-to="$link_dir" "$source_path")"
-
-    # Create the symlink
+    # Create the symlink (rel_source was computed above, before the
+    # conflict checks, so the already-stowed fast path could reuse it)
     if stow_sh::is_dry_run; then
         stow_sh::log debug 1 "WOULD link: '$link_path' -> '$rel_source'"
         stow_sh::report "?" "WOULD link $link_path -> $rel_source"
@@ -331,7 +435,8 @@ stow_sh::__remove_link() {
             local _unfold_child _name
             for _unfold_child in "$expected_source"/*; do
                 [[ -e "$_unfold_child" ]] || continue
-                _name="$(stow_sh::dotfiles_translate "${_unfold_child##*/}")"
+                stow_sh::__dotfiles_translate_var "${_unfold_child##*/}"
+                _name="$_stow_sh_dtrans"
                 stow_sh::__remove_link "$link_path/$_name" "$_unfold_child" "$target_dir" || _unfold_had_error=true
             done
             # Also handle dotfiles (hidden files/dirs)
@@ -339,7 +444,8 @@ stow_sh::__remove_link() {
                 _name="${_unfold_child##*/}"
                 [[ "$_name" == "." || "$_name" == ".." ]] && continue
                 [[ -e "$_unfold_child" ]] || continue
-                _name="$(stow_sh::dotfiles_translate "$_name")"
+                stow_sh::__dotfiles_translate_var "$_name"
+                _name="$_stow_sh_dtrans"
                 stow_sh::__remove_link "$link_path/$_name" "$_unfold_child" "$target_dir" || _unfold_had_error=true
             done
             if [[ "$_unfold_had_error" == true ]]; then
@@ -350,10 +456,14 @@ stow_sh::__remove_link() {
         # Check if an ancestor directory is a symlink pointing into the
         # package (i.e. stow created a fold point). If so, remove the
         # ancestor symlink instead — it covers this file.
-        local _canonical_source
-        _canonical_source="$(readlink -f "$expected_source")"
+        #
+        # _canonical_source is only needed when a symlink ancestor is
+        # actually found, so it's computed lazily — the common case
+        # (ancestor already handled) then costs zero forks.
+        local _canonical_source=""
         local _check_dir
-        _check_dir="$(dirname "$link_path")"
+        stow_sh::__dir_of "$link_path"
+        _check_dir="$_stow_sh_dir"
         while [[ "$_check_dir" != "$target_dir" && "$_check_dir" != "/" ]]; do
             if [[ -L "$_check_dir" ]] || [[ -n "${_stow_sh_handled_ancestors["$_check_dir"]+x}" ]]; then
                 # Already handled this ancestor (e.g. removed, or reported in dry-run)
@@ -363,6 +473,7 @@ stow_sh::__remove_link() {
                 fi
                 local _ancestor_target
                 _ancestor_target="$(readlink -f "$_check_dir")"
+                [[ -n "$_canonical_source" ]] || _canonical_source="$(readlink -f "$expected_source")"
                 # The ancestor covers this file if its resolved target is a
                 # prefix of the file's expected source (both canonical).
                 if [[ "$_canonical_source" == "$_ancestor_target"/* ]]; then
@@ -372,21 +483,35 @@ stow_sh::__remove_link() {
                     return $?
                 fi
             fi
-            _check_dir="$(dirname "$_check_dir")"
+            stow_sh::__dir_of "$_check_dir"
+            _check_dir="$_stow_sh_dir"
         done
         stow_sh::log error "Cannot unstow: '$link_path' is not a symlink"
         return 1
     fi
 
-    # Verify symlink points to the expected source
-    local actual_target
-    actual_target="$(readlink -f "$link_path")"
-    local canonical_source
-    canonical_source="$(readlink -f "$expected_source")"
+    # Verify symlink points to the expected source. Fast path: the link
+    # content matches exactly what stow would have created (relative link
+    # from the link's parent) — no canonicalization forks needed.
+    local actual_raw
+    stow_sh::__readlink_cached "$link_path"
+    actual_raw="$_stow_sh_readlink"
+    local _link_parent
+    stow_sh::__dir_of "$link_path"
+    _link_parent="$_stow_sh_dir"
+    stow_sh::__relpath "$_link_parent" "$expected_source"
+    if [[ "$actual_raw" != "$_stow_sh_rel" ]]; then
+        # Slow path: canonical comparison catches equivalent links written
+        # differently (e.g. absolute, or through symlinked parents).
+        local actual_target
+        actual_target="$(readlink -f "$link_path")"
+        local canonical_source
+        canonical_source="$(readlink -f "$expected_source")"
 
-    if [[ "$actual_target" != "$canonical_source" ]]; then
-        stow_sh::log error "Cannot unstow: '$link_path' points to '$actual_target', not '$canonical_source'"
-        return 1
+        if [[ "$actual_target" != "$canonical_source" ]]; then
+            stow_sh::log error "Cannot unstow: '$link_path' points to '$actual_target', not '$canonical_source'"
+            return 1
+        fi
     fi
 
     # Remove the symlink
@@ -396,20 +521,25 @@ stow_sh::__remove_link() {
     else
         stow_sh::log debug 1 "Unlinking: '$link_path'"
         rm "$link_path"
+        unset '_stow_sh_readlink_cache[$link_path]'
         stow_sh::report "-" "$link_path"
     fi
 
     # Clean up empty parent directories (up to target_dir, exclusive)
     if ! stow_sh::is_dry_run; then
         local dir
-        dir="$(dirname "$link_path")"
+        stow_sh::__dir_of "$link_path"
+        dir="$_stow_sh_dir"
+        # Prefer the per-package canonical target computed by unstow_package;
+        # fall back to a readlink fork only when called standalone.
         local canonical_target_dir
-        canonical_target_dir="$(readlink -f "$target_dir")"
-        while [[ "$dir" != "$canonical_target_dir" && "$dir" != "/" ]]; do
+        canonical_target_dir="${_stow_sh_canon_target:-$(readlink -f "$target_dir")}"
+        while [[ "$dir" != "$canonical_target_dir" && "$dir" != "$target_dir" && "$dir" != "/" ]]; do
             if [[ -d "$dir" ]] && _stow_sh__is_dir_empty "$dir"; then
                 stow_sh::log debug 2 "Removing empty directory: '$dir'"
                 rmdir "$dir"
-                dir="$(dirname "$dir")"
+                stow_sh::__dir_of "$dir"
+                dir="$_stow_sh_dir"
             else
                 break
             fi
@@ -419,11 +549,17 @@ stow_sh::__remove_link() {
     return 0
 }
 
-# Check if a directory is empty.
+# Check if a directory is empty. Pure bash (glob) — no fork.
 #
 # Usage: _stow_sh__is_dir_empty /path/to/dir
 # Returns: 0 if empty, 1 otherwise
 _stow_sh__is_dir_empty() {
-    local dir="$1"
-    [[ -d "$dir" ]] && [[ -z "$(ls -A "$dir" 2>/dev/null)" ]]
+    local dir="$1" entry base
+    [[ -d "$dir" ]] || return 1
+    for entry in "$dir"/* "$dir"/.*; do
+        base="${entry##*/}"
+        [[ "$base" == "." || "$base" == ".." ]] && continue
+        [[ -e "$entry" || -L "$entry" ]] && return 1
+    done
+    return 0
 }
