@@ -121,6 +121,48 @@ stow_sh::resolve_package() {
     done
 }
 
+# Memoized front-end for resolve_package: sets _stow_sh_resolved.
+#
+# The conflict pre-flight and the apply pass resolve identical inputs —
+# resolution reads only the package directory (scan/filter/fold), which
+# neither pass mutates before resolving (--adopt moves files into the
+# package only AFTER its resolution, and dry-run blocks it during
+# pre-flight). Caching halves the scan → filter → fold work; restow,
+# which resolves every package twice per pass, gains the most.
+#
+# The cache must live here in the parent shell: resolve_package is
+# captured via $(...), so any global written inside it would be lost
+# with the subshell.
+#
+# Usage: stow_sh::__resolve_package_cached [--no-fold] barrier_flags_var pkg_dir
+# Sets: _stow_sh_resolved (newline-separated resolved targets, may be empty)
+# Returns: resolve_package's status (failures are not cached)
+declare -gA _stow_sh_resolve_cache=()
+stow_sh::__resolve_package_cached() {
+    local mode="fold"
+    local -a flags=()
+    if [[ "${1:-}" == "--no-fold" ]]; then
+        mode="no-fold"
+        flags+=("--no-fold")
+        shift
+    fi
+    local barrier_flags_var="$1"
+    local pkg_dir="$2"
+
+    local key="$mode:$pkg_dir"
+    if [[ -n "${_stow_sh_resolve_cache[$key]+x}" ]]; then
+        _stow_sh_resolved="${_stow_sh_resolve_cache[$key]}"
+        return 0
+    fi
+
+    local out
+    if ! out="$(stow_sh::resolve_package "${flags[@]}" "$barrier_flags_var" "$pkg_dir")"; then
+        return 1
+    fi
+    _stow_sh_resolve_cache["$key"]="$out"
+    _stow_sh_resolved="$out"
+}
+
 # Top-level entry point: parse → setup → resolve → stow/unstow/restow.
 # Run every stow/unstow/restow operation once over the resolved package
 # lists. Reads package lists via the args getters and fold barriers from the
@@ -143,7 +185,7 @@ stow_sh::__apply_operations() {
     local had_error=false
 
     # --- Restow: unstow then stow ---
-    local pkg_dir resolve_output
+    local pkg_dir
     for pkg_dir in "${restow_packages[@]}"; do
         [[ -z "$pkg_dir" ]] && continue
         local pkg="${pkg_dir##*/}"
@@ -151,9 +193,9 @@ stow_sh::__apply_operations() {
 
         # Unstow phase: skip folding (let __remove_link handle filesystem state)
         local -a unstow_resolved
-        if resolve_output="$(stow_sh::resolve_package --no-fold _stow_sh_barrier_flags "$pkg_dir")"; then
-            if [[ -n "$resolve_output" ]]; then
-                mapfile -t unstow_resolved <<< "$resolve_output"
+        if stow_sh::__resolve_package_cached --no-fold _stow_sh_barrier_flags "$pkg_dir"; then
+            if [[ -n "$_stow_sh_resolved" ]]; then
+                mapfile -t unstow_resolved <<< "$_stow_sh_resolved"
             else
                 unstow_resolved=()
             fi
@@ -164,9 +206,9 @@ stow_sh::__apply_operations() {
 
         # Stow phase: use fold logic for optimal symlinks
         local -a stow_resolved
-        if resolve_output="$(stow_sh::resolve_package _stow_sh_barrier_flags "$pkg_dir")"; then
-            if [[ -n "$resolve_output" ]]; then
-                mapfile -t stow_resolved <<< "$resolve_output"
+        if stow_sh::__resolve_package_cached _stow_sh_barrier_flags "$pkg_dir"; then
+            if [[ -n "$_stow_sh_resolved" ]]; then
+                mapfile -t stow_resolved <<< "$_stow_sh_resolved"
             else
                 stow_resolved=()
             fi
@@ -180,6 +222,13 @@ stow_sh::__apply_operations() {
 
         stow_sh::unstow_package "$pkg_dir" "$target_dir" "${unstow_resolved[@]}" || had_error=true
         stow_sh::stow_package "$pkg_dir" "$target_dir" "${stow_resolved[@]}" || had_error=true
+
+        # --adopt is the only operation that mutates a package directory;
+        # drop its cached resolution so a later operation on the same
+        # package (e.g. listed under both -R and -S) re-scans it.
+        if stow_sh::is_adopt && ! stow_sh::is_dry_run; then
+            unset "_stow_sh_resolve_cache[fold:$pkg_dir]" "_stow_sh_resolve_cache[no-fold:$pkg_dir]"
+        fi
     done
 
     # --- Unstow ---
@@ -189,9 +238,9 @@ stow_sh::__apply_operations() {
         stow_sh::log debug 1 "Unstowing package: $pkg"
 
         local -a resolved
-        if resolve_output="$(stow_sh::resolve_package --no-fold _stow_sh_barrier_flags "$pkg_dir")"; then
-            if [[ -n "$resolve_output" ]]; then
-                mapfile -t resolved <<< "$resolve_output"
+        if stow_sh::__resolve_package_cached --no-fold _stow_sh_barrier_flags "$pkg_dir"; then
+            if [[ -n "$_stow_sh_resolved" ]]; then
+                mapfile -t resolved <<< "$_stow_sh_resolved"
             else
                 resolved=()
             fi
@@ -213,9 +262,9 @@ stow_sh::__apply_operations() {
         stow_sh::log debug 1 "Stowing package: $pkg"
 
         local -a resolved
-        if resolve_output="$(stow_sh::resolve_package _stow_sh_barrier_flags "$pkg_dir")"; then
-            if [[ -n "$resolve_output" ]]; then
-                mapfile -t resolved <<< "$resolve_output"
+        if stow_sh::__resolve_package_cached _stow_sh_barrier_flags "$pkg_dir"; then
+            if [[ -n "$_stow_sh_resolved" ]]; then
+                mapfile -t resolved <<< "$_stow_sh_resolved"
             else
                 resolved=()
             fi
@@ -228,6 +277,11 @@ stow_sh::__apply_operations() {
         stow_sh::report "+" "stow $pkg (${#resolved[@]} targets)"
 
         stow_sh::stow_package "$pkg_dir" "$target_dir" "${resolved[@]}" || had_error=true
+
+        # See restow loop: adoption mutates the package — invalidate.
+        if stow_sh::is_adopt && ! stow_sh::is_dry_run; then
+            unset "_stow_sh_resolve_cache[fold:$pkg_dir]" "_stow_sh_resolve_cache[no-fold:$pkg_dir]"
+        fi
     done
 
     [[ "$had_error" == true ]] && return 1

@@ -334,3 +334,18 @@ parse_no_git() {
     stow_sh::setup_paths
     [[ "$(stow_sh::get_target)" == "/tmp" ]]
 }
+
+@test "setup_paths: canonicalizes a symlinked target (relpath invariant)" {
+    # The pure-bash relative-path fast path in src/stow.sh relies on the
+    # target dir being canonical (no symlink components). This pins the
+    # invariant so a future setup_paths change can't silently break it.
+    tmp="$(mktemp -d)"
+    mkdir -p "$tmp/real_target"
+    ln -s "$tmp/real_target" "$tmp/link_target"
+
+    parse_no_git -t "$tmp/link_target" -S pkg
+    stow_sh::setup_paths
+    [[ "$(stow_sh::get_target)" == "$(readlink -f "$tmp/real_target")" ]]
+
+    rm -rf "$tmp"
+}

@@ -699,3 +699,26 @@ teardown() {
     # Ancestor fold point should still be there (not duplicated)
     [ -L "$TARGET_DIR/.config" ]
 }
+
+@test "stow_package links correctly through a symlinked intermediate dir" {
+    # A pre-existing symlinked dir under the target (e.g. a user's
+    # ~/.config -> elsewhere) disables the pure-bash relative-path fast
+    # path in __create_link; the realpath fallback must still produce a
+    # link that resolves to the package file.
+    mkdir -p "$PKG_DIR/.config/app"
+    echo "content" > "$PKG_DIR/.config/app/conf.toml"
+
+    # target/.config is a symlink pointing OUTSIDE the package
+    mkdir -p "$TEST_DIR/elsewhere"
+    ln -s "$TEST_DIR/elsewhere" "$TARGET_DIR/.config"
+
+    run stow_sh::stow_package "$PKG_DIR" "$TARGET_DIR" ".config/app/conf.toml"
+    [ "$status" -eq 0 ]
+    [ -L "$TARGET_DIR/.config/app/conf.toml" ]
+    [ "$(cat "$TARGET_DIR/.config/app/conf.toml")" = "content" ]
+    [ "$(readlink -f "$TARGET_DIR/.config/app/conf.toml")" = "$(readlink -f "$PKG_DIR/.config/app/conf.toml")" ]
+
+    # Re-stow must detect "already stowed" through the same fallback
+    run stow_sh::stow_package "$PKG_DIR" "$TARGET_DIR" ".config/app/conf.toml"
+    [ "$status" -eq 0 ]
+}
