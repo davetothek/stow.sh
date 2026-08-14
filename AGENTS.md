@@ -59,6 +59,7 @@ stow.sh/
 │   └── version.sh           # Version constant (managed by `make release`)
 ├── conditions.d/            # Built-in condition predicates (loaded as plugins)
 │   ├── docker.sh            #   docker — /.dockerenv check
+│   ├── container.sh         #   container — Docker/Podman/nspawn/LXC detection
 │   ├── desktop.sh           #   desktop — no battery (stationary machine)
 │   ├── exe.sh               #   exe.<name> — executable in $PATH
 │   ├── extension.sh         #   extension — always true (preserve file extensions)

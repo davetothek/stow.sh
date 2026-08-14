@@ -311,6 +311,7 @@ dir##condition/file          # directory condition propagates to children
 | `exe.<name>` | True if executable is in `$PATH` | `file##exe.nvim` |
 | `wm.<name>` | Alias for `exe` | `file##wm.sway` |
 | `docker` | True inside Docker (`/.dockerenv`) | `file##!docker` |
+| `container` | True inside any container (Docker, Podman, nspawn, LXC) | `file##!container` |
 | `wsl` | True inside WSL (`/proc/version`) | `file##wsl` |
 | `laptop` | True if system has a battery | `file##laptop` |
 | `desktop` | True if system has no battery | `file##desktop` |
@@ -324,6 +325,7 @@ dir##condition/file          # directory condition propagates to children
 .config/sway##wm.sway/        # Entire directory only if sway is installed
 gpg-agent.conf##!wsl          # Deploy everywhere except WSL
 20-desktop.toml##!docker      # Skip in Docker containers
+.config/systemd##!container   # Skip in any container runtime
 .config/tlp##laptop/          # Power management only on laptops
 monitors.xml##desktop         # Static monitor layout on desktops only
 .local/lib/stow.sh##no/       # Never deploy (e.g. git submodule)

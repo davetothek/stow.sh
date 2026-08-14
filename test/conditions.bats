@@ -143,6 +143,29 @@ setup() {
     [ "$status" -eq 0 ]
 }
 
+# --- stow_sh::condition::container ---
+
+@test "condition::container returns 0 when \$container is set" {
+    container=podman run stow_sh::condition::container
+    [ "$status" -eq 0 ]
+}
+
+@test "condition::container returns 1 outside any container" {
+    if [[ -f /.dockerenv || -f /run/.containerenv || -n ${container:-} ]]; then
+        skip "Running inside a container — cannot test negative case"
+    fi
+    container='' run stow_sh::condition::container
+    [ "$status" -eq 1 ]
+}
+
+@test "check_conditions returns 0 for container negation outside containers" {
+    if [[ -f /.dockerenv || -f /run/.containerenv || -n ${container:-} ]]; then
+        skip "Running inside a container — cannot test !container"
+    fi
+    run stow_sh::check_conditions "20-desktop.toml##!container"
+    [ "$status" -eq 0 ]
+}
+
 # --- stow_sh::condition::extension ---
 
 @test "condition::extension always returns 0" {
