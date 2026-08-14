@@ -1,0 +1,19 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2025 David Kristiansen
+
+# Development toolchain for stow.sh itself. stow.sh has no runtime
+# dependencies beyond bash and coreutils — these are only needed to lint
+# and test it.
+#
+# `make lint` needs shellcheck and `make test` needs bats. Both skip with a
+# warning when the tool is missing, and so does the pre-commit hook, so
+# without these declared a commit can silently verify nothing. Declaring
+# them here puts both on PATH on cd into the repo and keeps contributors on
+# the same tools.
+#
+# CI installs the same two from apt (see .github/workflows/ci.yml) rather
+# than bootstrapping mise on the runner.
+
+[tools]
+bats = "latest"
+shellcheck = "latest"

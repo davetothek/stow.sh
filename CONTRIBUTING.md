@@ -8,6 +8,17 @@
 - [shfmt](https://github.com/mvdan/sh) for formatting (configured in `.editorconfig`)
 - [commitizen](https://commitizen-tools.github.io/commitizen/) for version bumps
 
+bats and shellcheck are declared in `mise.toml`, so with
+[mise](https://mise.jdx.dev/) installed they are set up with:
+
+```bash
+mise install
+```
+
+This matters more than it looks: `make lint`, `make test` and the pre-commit
+hook all *skip* a missing tool with a warning rather than failing, so without
+them a commit can pass while verifying nothing.
+
 ## Development setup
 
 Run directly from the source tree -- `bin/stow.sh` resolves all paths relative to itself:
