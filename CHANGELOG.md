@@ -1,3 +1,13 @@
+## v0.18.0 (2026-08-14)
+
+### Feat
+
+- **conditions**: add container condition
+
+### Fix
+
+- **test**: stop hook-run tests from corrupting the real git index
+
 ## v0.17.0 (2026-07-10)
 
 ### Perf
