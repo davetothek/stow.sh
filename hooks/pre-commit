@@ -17,6 +17,13 @@ set -euo pipefail
 repo_root="$(git rev-parse --show-toplevel)"
 cd "$repo_root"
 
+# Drop the git environment git exports into hooks before running anything
+# else. The test suite creates throwaway repos and runs `git add` in them;
+# inheriting GIT_INDEX_FILE / GIT_DIR would point those writes at the real
+# repository and corrupt the index of the commit in progress.
+unset GIT_INDEX_FILE GIT_DIR GIT_WORK_TREE GIT_PREFIX GIT_OBJECT_DIRECTORY
+unset GIT_ALTERNATE_OBJECT_DIRECTORIES
+
 status=0
 
 # --- shellcheck ---

@@ -3,6 +3,13 @@
 # Copyright (c) 2025 David Kristiansen
 
 setup_file() {
+  # These tests run `git init` / `git add` in a throwaway repo. If the suite
+  # is invoked from a git hook, git has exported GIT_INDEX_FILE / GIT_DIR into
+  # the environment and those writes would land in the *real* repository
+  # instead. Clear them so the temp repo is the only repo we touch.
+  unset GIT_INDEX_FILE GIT_DIR GIT_WORK_TREE GIT_PREFIX GIT_OBJECT_DIRECTORY
+  unset GIT_ALTERNATE_OBJECT_DIRECTORIES
+
   # Must be exported: bats runs setup_file in a separate shell from setup()
   # and the tests, so a non-exported var would be empty there.
   export TEST_REPO
