@@ -28,6 +28,7 @@
   - [Self-stow mode](#self-stow-mode)
 - [Usage](#usage)
   - [Filtering priority](#filtering-priority)
+  - [Git-aware filtering](#git-aware-filtering)
   - [.stowignore](#stowignore)
 - [Dotfiles mode](#dotfiles-mode)
 - [Conditional Dotfiles](#conditional-dotfiles)
@@ -243,6 +244,24 @@ Filters are applied in order:
 2. **Git-aware** -- `.gitignore` rules (if enabled)
 3. **Regex** (`-i`) -- regex patterns
 4. **Glob** (`-I`) -- glob patterns
+
+### Git-aware filtering
+
+With `-g` (auto-enabled inside a git repository), files ignored by git are
+skipped, including negation patterns. Git's own bookkeeping is never stowed:
+
+- `.git/`
+- the **package-root** `.gitignore` -- it configures this filter and describes
+  the repository, so deploying it as `~/.gitignore` is never what you want
+
+A **nested** `.gitignore` is treated as content and still deploys -- a vendored
+tree or a project template legitimately ships one. Note that if a nested
+`.gitignore` excludes anything beside it, that directory can no longer be
+folded, since a directory symlink would expose the ignored files at the target.
+
+To deploy a global gitignore, either put it at `~/.config/git/ignore` (git's
+XDG default) or, under `--dotfiles`, name it `dot-gitignore` -- git does not
+read that as rules, so it is deployed like any other file.
 
 ### .stowignore
 

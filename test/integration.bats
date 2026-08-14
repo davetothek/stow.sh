@@ -553,6 +553,82 @@ teardown() {
 }
 
 # ============================================================
+# Git-aware filtering
+# ============================================================
+#
+# Git operations in filter.sh are relative to the working directory, so these
+# tests cd into the package (the self-stow layout real dotfiles repos use).
+
+@test "integration: git mode does not stow the package-root .gitignore" {
+    local pkg="$SOURCE_DIR/pkg"
+    mkdir -p "$pkg/.config/tmpl"
+    git -C "$pkg" init -q
+    printf 'junk.txt\n' > "$pkg/.gitignore"
+    echo "rc" > "$pkg/.bashrc"
+    echo "junk" > "$pkg/junk.txt"
+    # A nested .gitignore is payload — here a project template that ships one
+    printf 'build/\n' > "$pkg/.config/tmpl/.gitignore"
+    echo "print()" > "$pkg/.config/tmpl/main.py"
+
+    cd "$pkg"
+    run "$STOW_SH" -g --no-xdg --no-folding -d "$SOURCE_DIR" -t "$TARGET_DIR" -S pkg
+    [ "$status" -eq 0 ]
+    [ -L "$TARGET_DIR/.bashrc" ]
+    # Root .gitignore is the repo's own bookkeeping — never deployed
+    [ ! -e "$TARGET_DIR/.gitignore" ]
+    # Files it ignores are excluded as usual
+    [ ! -e "$TARGET_DIR/junk.txt" ]
+    # ...but a nested .gitignore is content, and still deploys
+    [ -L "$TARGET_DIR/.config/tmpl/.gitignore" ]
+    [ -L "$TARGET_DIR/.config/tmpl/main.py" ]
+    # .git/ never leaks either
+    [ ! -e "$TARGET_DIR/.git" ]
+}
+
+@test "integration: nested .gitignore that excludes a sibling blocks folding" {
+    local pkg="$SOURCE_DIR/pkg"
+    mkdir -p "$pkg/.config/app"
+    git -C "$pkg" init -q
+    : > "$pkg/.gitignore"
+    # The nested rules file ships as payload AND excludes a sibling, so the
+    # directory must not fold — a fold point would expose secret.env at the
+    # target through the directory symlink.
+    printf 'secret.env\n' > "$pkg/.config/app/.gitignore"
+    echo "cfg" > "$pkg/.config/app/config.toml"
+    echo "s3cr3t" > "$pkg/.config/app/secret.env"
+
+    cd "$pkg"
+    run "$STOW_SH" -g --no-xdg -d "$SOURCE_DIR" -t "$TARGET_DIR" -S pkg
+    [ "$status" -eq 0 ]
+    # Real directories, not fold points
+    [ -d "$TARGET_DIR/.config/app" ] && [ ! -L "$TARGET_DIR/.config/app" ]
+    [ ! -L "$TARGET_DIR/.config" ]
+    [ -L "$TARGET_DIR/.config/app/config.toml" ]
+    [ -L "$TARGET_DIR/.config/app/.gitignore" ]
+    # The ignored file must not be reachable at the target
+    [ ! -e "$TARGET_DIR/.config/app/secret.env" ]
+}
+
+@test "integration: nested .gitignore excluding nothing still folds" {
+    local pkg="$SOURCE_DIR/pkg"
+    mkdir -p "$pkg/.config/app"
+    git -C "$pkg" init -q
+    : > "$pkg/.gitignore"
+    # Rules that match nothing present: every candidate survives, so the
+    # subtree is still foldable and the nested .gitignore rides along inside.
+    printf 'build/\n' > "$pkg/.config/app/.gitignore"
+    echo "cfg" > "$pkg/.config/app/config.toml"
+
+    cd "$pkg"
+    run "$STOW_SH" -g --no-xdg -d "$SOURCE_DIR" -t "$TARGET_DIR" -S pkg
+    [ "$status" -eq 0 ]
+    # Folds at the shallowest clean directory
+    [ -L "$TARGET_DIR/.config" ]
+    [ -f "$TARGET_DIR/.config/app/.gitignore" ]
+    [ -f "$TARGET_DIR/.config/app/config.toml" ]
+}
+
+# ============================================================
 # Error cases
 # ============================================================
 

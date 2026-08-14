@@ -199,6 +199,52 @@ setup() {
   [ "$status" -eq 0 ]
 }
 
+@test "stow_sh::git_should_ignore always ignores the root .gitignore" {
+  # git normally reports .gitignore as NOT ignored (it is tracked), so this
+  # has to be an explicit rule rather than a check-ignore result.
+  #
+  # Root only — the nested case is covered end-to-end in integration.bats,
+  # which needs a fixture whose rules do not contain '.*' (that pattern makes
+  # git itself report every .gitignore basename as ignored, masking the rule
+  # under test).
+  relpath="."
+  run stow_sh::git_should_ignore "$relpath" ".gitignore"
+  [ "$status" -eq 0 ]
+}
+
+@test "stow_sh::git_should_ignore keeps a --dotfiles dot-gitignore" {
+  # dot-gitignore is payload, not a git rule source — git does not read it,
+  # so stow.sh must still deploy it (as .gitignore under --dotfiles).
+  relpath="."
+  run stow_sh::git_should_ignore "$relpath" "dot-gitignore"
+  [ "$status" -eq 1 ]
+}
+
+@test "stow_sh::git_should_ignore keeps files merely ending in .gitignore" {
+  relpath="."
+  run stow_sh::git_should_ignore "$relpath" "templates/python.gitignore"
+  [ "$status" -eq 1 ]
+}
+
+@test "stow_sh::filter_candidates excludes .gitignore in git mode" {
+  input=$'.gitignore\n.zshrc'
+  run bash -c "source '$BATS_TEST_DIRNAME/../src/log.sh'; source '$BATS_TEST_DIRNAME/../src/filter.sh'; declare -a _stow_sh_ignore=(); declare -a _stow_sh_ignore_glob=(); _stow_sh_git_mode=true; stow_sh::filter_candidates <<< \"$input\""
+  [ "$status" -eq 0 ]
+  [[ "$output" != *".gitignore"* ]]
+  [[ "$output" == *".zshrc"* ]]
+}
+
+@test "stow_sh::filter_candidates keeps .gitignore when git mode is off" {
+  # Without -g stow.sh is not reading .gitignore as configuration, so it is
+  # just an ordinary file.
+  input=$'.gitignore\n.zshrc'
+  run bash -c "source '$BATS_TEST_DIRNAME/../src/log.sh'; source '$BATS_TEST_DIRNAME/../src/filter.sh'; declare -a _stow_sh_ignore=(); declare -a _stow_sh_ignore_glob=(); _stow_sh_git_mode=false; stow_sh::filter_candidates <<< \"$input\""
+  [ "$status" -eq 0 ]
+  [[ "$output" == *".gitignore"* ]]
+  [[ "$output" == *".zshrc"* ]]
+}
+
+
 # ============================================================
 # .stowignore tests
 # ============================================================

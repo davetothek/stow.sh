@@ -7,7 +7,8 @@
 #
 # Filters candidate paths through up to four layers:
 #   1. Stowignore: patterns from .stowignore file(s) in the package
-#   2. Git-aware: batch git check-ignore via --stdin (single fork)
+#   2. Git-aware: batch git check-ignore via --stdin (single fork). Also
+#      excludes git's own bookkeeping — .git/ and the root .gitignore.
 #   3. Regex: user-supplied -i patterns matched against relative paths
 #   4. Glob: user-supplied -I patterns matched against relative paths
 #
@@ -166,7 +167,7 @@ stow_sh::match_stowignore() {
 #
 # Uses `git check-ignore --verbose` to distinguish between matched ignore
 # rules and negation patterns (lines starting with !). The .git/ directory
-# itself is always ignored.
+# and the package-root .gitignore are always ignored.
 #
 # Note: this forks a subprocess per call — use __build_git_ignored_set for
 # bulk filtering. Kept as a public function for testability.
@@ -180,6 +181,17 @@ stow_sh::git_should_ignore() {
 
     # Always ignore .git/ directory explicitly
     if [[ "$path" == ".git" || "$path" == .git/* ]]; then
+        return 0
+    fi
+
+    # The package-root .gitignore is the repository's own bookkeeping, not
+    # payload. git never reports it as ignored (it is normally tracked), so
+    # without this it would be stowed as ~/.gitignore.
+    #
+    # Root only: a nested .gitignore is content belonging to whatever subtree
+    # ships it (a vendored tree, a project template) and still deploys. And
+    # matched on the source name, so a --dotfiles `dot-gitignore` is untouched.
+    if [[ "$path" == ".gitignore" ]]; then
         return 0
     fi
 
@@ -232,6 +244,12 @@ stow_sh::__build_git_ignored_set() {
         # .git/ is always ignored — mark it directly, skip git check-ignore
         if [[ "$p" == ".git" || "$p" == .git/* ]]; then
             _ignored["$p"]=1
+            continue
+        fi
+        # Same for the root .gitignore — see stow_sh::git_should_ignore.
+        if [[ "$p" == ".gitignore" ]]; then
+            _ignored["$p"]=1
+            stow_sh::log debug 3 "Git metadata (never stowed): '$p'"
             continue
         fi
         if [[ "$relpath" == "." ]]; then
