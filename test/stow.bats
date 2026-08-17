@@ -684,20 +684,163 @@ teardown() {
     [ ! -e "$TARGET_DIR/.config" ]
 }
 
-@test "stow_package detects ancestor fold point for already-stowed files" {
-    # When a fold point exists and stow tries to create individual links,
-    # it should detect "already stowed via ancestor"
+@test "stow_package keeps an ancestor fold point that is still planned" {
+    # The target list holds the fold point, so the run keeps it. Each file
+    # below it is already stowed through the fold point.
     mkdir -p "$PKG_DIR/.config/nvim"
     echo "init" > "$PKG_DIR/.config/nvim/init.lua"
 
     # Create the fold-point directory symlink (as if stowed previously)
     ln -s "$PKG_DIR/.config" "$TARGET_DIR/.config"
 
-    # Stow with individual file target — should detect ancestor and skip
-    run stow_sh::stow_package "$PKG_DIR" "$TARGET_DIR" ".config/nvim/init.lua"
+    run stow_sh::stow_package "$PKG_DIR" "$TARGET_DIR" \
+        ".config" ".config/nvim/init.lua"
     [ "$status" -eq 0 ]
-    # Ancestor fold point should still be there (not duplicated)
+    # Ancestor fold point should still be there (not unfolded, not duplicated)
     [ -L "$TARGET_DIR/.config" ]
+    [ "$(readlink -f "$TARGET_DIR/.config")" = "$(readlink -f "$PKG_DIR/.config")" ]
+}
+
+# ============================================================
+# Stale fold point re-evaluation
+# ============================================================
+#
+# A fold point becomes stale when an earlier run folded a directory and the
+# current run does not resolve that directory as a fold point. The usual
+# cause is a file that the filter removes, such as a gitignored file. A fold
+# point that stays serves that file from inside the package.
+
+@test "stow_package unfolds a stale fold point and evicts unplanned files" {
+    mkdir -p "$PKG_DIR/.appdir"
+    echo "cfg" > "$PKG_DIR/.appdir/config.toml"
+    echo "local" > "$PKG_DIR/.appdir/local.conf"
+
+    # An earlier run folded the whole directory
+    ln -s "$PKG_DIR/.appdir" "$TARGET_DIR/.appdir"
+
+    # This run resolves config.toml only. The filter removed local.conf.
+    run stow_sh::stow_package "$PKG_DIR" "$TARGET_DIR" ".appdir/config.toml"
+    [ "$status" -eq 0 ]
+
+    # A real directory and a per-file link replace the fold point
+    [ -d "$TARGET_DIR/.appdir" ] && [ ! -L "$TARGET_DIR/.appdir" ]
+    [ -L "$TARGET_DIR/.appdir/config.toml" ]
+    [ "$(readlink -f "$TARGET_DIR/.appdir/config.toml")" = "$(readlink -f "$PKG_DIR/.appdir/config.toml")" ]
+
+    # The run moves the unplanned file out of the package to the target
+    [ -f "$TARGET_DIR/.appdir/local.conf" ] && [ ! -L "$TARGET_DIR/.appdir/local.conf" ]
+    [ "$(cat "$TARGET_DIR/.appdir/local.conf")" = "local" ]
+    [ ! -e "$PKG_DIR/.appdir/local.conf" ]
+}
+
+@test "stow_package stale unfold recurses into subdirectories" {
+    mkdir -p "$PKG_DIR/.appdir/sub"
+    echo "cfg" > "$PKG_DIR/.appdir/sub/config.toml"
+    echo "state" > "$PKG_DIR/.appdir/sub/state.db"
+    echo "log" > "$PKG_DIR/.appdir/app.log"
+
+    ln -s "$PKG_DIR/.appdir" "$TARGET_DIR/.appdir"
+
+    run stow_sh::stow_package "$PKG_DIR" "$TARGET_DIR" ".appdir/sub/config.toml"
+    [ "$status" -eq 0 ]
+
+    # Both levels become real directories
+    [ -d "$TARGET_DIR/.appdir" ] && [ ! -L "$TARGET_DIR/.appdir" ]
+    [ -d "$TARGET_DIR/.appdir/sub" ] && [ ! -L "$TARGET_DIR/.appdir/sub" ]
+    [ -L "$TARGET_DIR/.appdir/sub/config.toml" ]
+
+    # The run moves the unplanned files at both levels
+    [ -f "$TARGET_DIR/.appdir/app.log" ] && [ ! -L "$TARGET_DIR/.appdir/app.log" ]
+    [ -f "$TARGET_DIR/.appdir/sub/state.db" ] && [ ! -L "$TARGET_DIR/.appdir/sub/state.db" ]
+    [ ! -e "$PKG_DIR/.appdir/app.log" ]
+    [ ! -e "$PKG_DIR/.appdir/sub/state.db" ]
+}
+
+@test "stow_package stale unfold evicts an unplanned directory whole" {
+    mkdir -p "$PKG_DIR/.appdir/cache/inner"
+    echo "cfg" > "$PKG_DIR/.appdir/config.toml"
+    echo "blob" > "$PKG_DIR/.appdir/cache/inner/blob.bin"
+
+    ln -s "$PKG_DIR/.appdir" "$TARGET_DIR/.appdir"
+
+    run stow_sh::stow_package "$PKG_DIR" "$TARGET_DIR" ".appdir/config.toml"
+    [ "$status" -eq 0 ]
+
+    # The plan holds nothing under cache/, so the directory moves as a unit
+    [ -d "$TARGET_DIR/.appdir/cache/inner" ] && [ ! -L "$TARGET_DIR/.appdir/cache" ]
+    [ "$(cat "$TARGET_DIR/.appdir/cache/inner/blob.bin")" = "blob" ]
+    [ ! -e "$PKG_DIR/.appdir/cache" ]
+}
+
+@test "stow_package stale unfold keeps a planned fold point inside it" {
+    mkdir -p "$PKG_DIR/.appdir/sub"
+    echo "cfg" > "$PKG_DIR/.appdir/sub/config.toml"
+    echo "local" > "$PKG_DIR/.appdir/local.conf"
+
+    ln -s "$PKG_DIR/.appdir" "$TARGET_DIR/.appdir"
+
+    # .appdir/sub is still foldable. Only .appdir became stale.
+    run stow_sh::stow_package "$PKG_DIR" "$TARGET_DIR" ".appdir/sub"
+    [ "$status" -eq 0 ]
+
+    [ -d "$TARGET_DIR/.appdir" ] && [ ! -L "$TARGET_DIR/.appdir" ]
+    # The run links the inner fold point and does not unfold it
+    [ -L "$TARGET_DIR/.appdir/sub" ]
+    [ "$(readlink -f "$TARGET_DIR/.appdir/sub")" = "$(readlink -f "$PKG_DIR/.appdir/sub")" ]
+    [ ! -e "$PKG_DIR/.appdir/local.conf" ]
+    [ -f "$TARGET_DIR/.appdir/local.conf" ]
+}
+
+@test "stow_package stale unfold reports one unfold for many files" {
+    mkdir -p "$PKG_DIR/.appdir"
+    echo "a" > "$PKG_DIR/.appdir/a.toml"
+    echo "b" > "$PKG_DIR/.appdir/b.toml"
+    echo "local" > "$PKG_DIR/.appdir/local.conf"
+
+    ln -s "$PKG_DIR/.appdir" "$TARGET_DIR/.appdir"
+
+    run stow_sh::stow_package "$PKG_DIR" "$TARGET_DIR" \
+        ".appdir/a.toml" ".appdir/b.toml"
+    [ "$status" -eq 0 ]
+    [ "$(grep -c "unfold" <<< "$output")" -eq 1 ]
+    [ -L "$TARGET_DIR/.appdir/a.toml" ]
+    [ -L "$TARGET_DIR/.appdir/b.toml" ]
+    [ -f "$TARGET_DIR/.appdir/local.conf" ]
+}
+
+@test "stow_package --dry-run reports a stale unfold without touching anything" {
+    _stow_sh_dry_run=true
+    mkdir -p "$PKG_DIR/.appdir"
+    echo "cfg" > "$PKG_DIR/.appdir/config.toml"
+    echo "local" > "$PKG_DIR/.appdir/local.conf"
+
+    ln -s "$PKG_DIR/.appdir" "$TARGET_DIR/.appdir"
+
+    run stow_sh::stow_package "$PKG_DIR" "$TARGET_DIR" ".appdir/config.toml"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"WOULD unfold"* ]]
+    [[ "$output" == *"WOULD evict"* ]]
+
+    # Nothing on disk changes
+    [ -L "$TARGET_DIR/.appdir" ]
+    [ -f "$PKG_DIR/.appdir/local.conf" ]
+}
+
+@test "stow_package stale unfold translates dot- names under --dotfiles" {
+    _stow_sh_dotfiles=true
+    mkdir -p "$PKG_DIR/dot-appdir"
+    echo "cfg" > "$PKG_DIR/dot-appdir/config.toml"
+    echo "local" > "$PKG_DIR/dot-appdir/local.conf"
+
+    ln -s "$PKG_DIR/dot-appdir" "$TARGET_DIR/.appdir"
+
+    run stow_sh::stow_package "$PKG_DIR" "$TARGET_DIR" "dot-appdir/config.toml"
+    [ "$status" -eq 0 ]
+
+    [ -d "$TARGET_DIR/.appdir" ] && [ ! -L "$TARGET_DIR/.appdir" ]
+    [ -L "$TARGET_DIR/.appdir/config.toml" ]
+    [ -f "$TARGET_DIR/.appdir/local.conf" ]
+    [ ! -e "$PKG_DIR/dot-appdir/local.conf" ]
 }
 
 @test "stow_package links correctly through a symlinked intermediate dir" {

@@ -23,6 +23,22 @@
 # readlink forks. Entries are invalidated whenever a link is removed.
 declare -gA _stow_sh_readlink_cache=()
 
+# Link paths this run plans to create, and their ancestor directories.
+# stow_package builds both sets again for each package. __create_link reads
+# them to tell a planned fold point from a stale one. __unfold_stale_walk
+# reads them to tell package content from application state.
+declare -gA _stow_sh_planned_links=()
+declare -gA _stow_sh_planned_under=()
+
+# Stale fold points that this pass handled. One fold point can cover many
+# files, and a dry-run pass does not remove it. Each file below it therefore
+# finds it again. This set keeps the report to one line for each fold point.
+declare -gA _stow_sh_unfolded_folds=()
+
+# True after an operation moves a file into or out of a package directory.
+# main.sh then drops the cached resolution of that package.
+declare -g _stow_sh_pkg_mutated=false
+
 # Read a symlink's content (raw, not canonicalized) through the cache.
 # Sets _stow_sh_readlink.
 #
@@ -126,6 +142,30 @@ stow_sh::stow_package() {
 
     stow_sh::log debug 1 "Stowing ${#resolved_targets[@]} targets from '$pkg_dir' into '$target_dir'"
 
+    # Record the plan before the run creates a link. The run then checks each
+    # target against the full plan, not against the targets seen so far. The
+    # plan keeps the targets that fail their conditions. A fold point with a
+    # failed condition is no proof that the fold point is stale.
+    _stow_sh_planned_links=()
+    _stow_sh_planned_under=()
+    _stow_sh_unfolded_folds=()
+    _stow_sh_pkg_mutated=false
+    local _plan_target _plan_dir
+    for _plan_target in "${resolved_targets[@]}"; do
+        [[ -z "$_plan_target" ]] && continue
+        stow_sh::__link_rel "$_plan_target"
+        _stow_sh_planned_links["$target_dir/$_stow_sh_link_rel"]=1
+        stow_sh::__dir_of "$target_dir/$_stow_sh_link_rel"
+        _plan_dir="$_stow_sh_dir"
+        while [[ "$_plan_dir" != "$target_dir" && "$_plan_dir" != "/" && "$_plan_dir" != "." ]]; do
+            # Early exit: a recorded dir has all its ancestors recorded too
+            [[ -n "${_stow_sh_planned_under[$_plan_dir]+set}" ]] && break
+            _stow_sh_planned_under["$_plan_dir"]=1
+            stow_sh::__dir_of "$_plan_dir"
+            _plan_dir="$_stow_sh_dir"
+        done
+    done
+
     local target
     for target in "${resolved_targets[@]}"; do
         [[ -z "$target" ]] && continue
@@ -195,6 +235,107 @@ stow_sh::unstow_package() {
 
 # --- Internal helpers ---
 
+# Take a stale fold point apart. Replace the directory symlink with a real
+# directory. Then move each file that the run does not plan to link. The
+# files move out of the package and into the target.
+#
+# The move is the purpose of the operation, not a side effect. An
+# application wrote such a file through the fold point, so the write landed
+# in the package. The package does not track the file, because a tracked
+# file does not make a fold point stale. A file that stays in the package
+# hides application state in the repository, where `git clean` removes it.
+# A file that moves to the target stays where the application reads it.
+#
+# Usage: stow_sh::__unfold_stale fold_link source_dir
+#   fold_link — the directory symlink at the target
+#   source_dir — canonical path it points to, inside the package
+# Returns: 0 on success, 1 if an eviction destination is occupied
+stow_sh::__unfold_stale() {
+    local fold_link="$1"
+    local source_dir="$2"
+
+    # Each planned file below the fold point finds it again, and a dry-run
+    # pass keeps it. Report and walk the fold point one time for each pass.
+    [[ -n "${_stow_sh_unfolded_folds[$fold_link]+set}" ]] && return 0
+    _stow_sh_unfolded_folds["$fold_link"]=1
+
+    if stow_sh::is_dry_run; then
+        stow_sh::log debug 1 "WOULD unfold stale fold point: '$fold_link' -> '$source_dir'"
+        stow_sh::report "?" "WOULD unfold $fold_link (stale fold point)"
+        stow_sh::__unfold_stale_walk "$source_dir" "$fold_link"
+        return $?
+    fi
+
+    stow_sh::log debug 1 "Unfolding stale fold point: '$fold_link' -> '$source_dir'"
+    stow_sh::report "+" "unfold $fold_link (stale fold point)"
+    rm "$fold_link"
+    unset "_stow_sh_readlink_cache[$fold_link]"
+    mkdir "$fold_link"
+    stow_sh::__unfold_stale_walk "$source_dir" "$fold_link"
+}
+
+# Walk the source directory of a stale fold point. Move each entry that the
+# run does not plan to link.
+#
+# The plan from stow_package gives three cases for each entry:
+#   * The entry is a planned link. Leave it. The target loop in stow_package
+#     creates it as a file link or as an inner fold point.
+#   * The entry holds planned links deeper down. Make the directory and walk
+#     into it. The run then also moves the unplanned entries beside them.
+#   * Neither case applies. This run links nothing in the entry, so the
+#     entry moves to the target.
+#
+# Usage: stow_sh::__unfold_stale_walk source_dir dest_dir
+# Returns: 0 on success, 1 if an eviction destination is occupied
+stow_sh::__unfold_stale_walk() {
+    local source_dir="$1"
+    local dest_dir="$2"
+
+    local had_error=false
+    local entry name dest
+    for entry in "$source_dir"/* "$source_dir"/.*; do
+        [[ ! -e "$entry" && ! -L "$entry" ]] && continue
+        name="${entry##*/}"
+        [[ "$name" == "." || "$name" == ".." ]] && continue
+        stow_sh::__dotfiles_translate_var "$name"
+        dest="$dest_dir/$_stow_sh_dtrans"
+
+        [[ -n "${_stow_sh_planned_links[$dest]+set}" ]] && continue
+
+        if [[ -n "${_stow_sh_planned_under[$dest]+set}" ]]; then
+            if [[ -d "$entry" && ! -L "$entry" ]]; then
+                if stow_sh::is_dry_run; then
+                    stow_sh::log debug 2 "WOULD mkdir '$dest' (unfold)"
+                else
+                    mkdir -p "$dest"
+                fi
+                stow_sh::__unfold_stale_walk "$entry" "$dest" || had_error=true
+            fi
+            continue
+        fi
+
+        if stow_sh::is_dry_run; then
+            stow_sh::log debug 1 "WOULD evict: '$entry' -> '$dest'"
+            stow_sh::report "?" "WOULD evict $entry -> $dest"
+            continue
+        fi
+        # The run made this destination tree empty. A path that exists here
+        # shows a change from another process. Refuse. Do not overwrite.
+        if [[ -e "$dest" || -L "$dest" ]]; then
+            stow_sh::log error "Refusing to evict '$entry': '$dest' already exists"
+            had_error=true
+            continue
+        fi
+        stow_sh::log debug 1 "Evicting: '$entry' -> '$dest'"
+        stow_sh::report "+" "evict $entry -> $dest"
+        mv "$entry" "$dest"
+        _stow_sh_pkg_mutated=true
+    done
+
+    [[ "$had_error" == true ]] && return 1
+    return 0
+}
+
 # Create a single symlink, handling conflicts.
 #
 # Handles four cases at the link path: nothing exists (create), already
@@ -220,11 +361,17 @@ stow_sh::__create_link() {
     stow_sh::__dir_of "$link_path"
     link_dir="$_stow_sh_dir"
 
-    # Check if an ancestor directory is already a symlink pointing into the
-    # package. This happens when a previous stow created a directory symlink
-    # (fold point) but the current run resolves individual files instead
-    # (e.g. due to filter changes). The files are effectively "already stowed"
-    # through the ancestor directory symlink.
+    # Find an ancestor directory that is a symlink into the package. Such a
+    # symlink is a fold point from an earlier run. The plan of this run, not
+    # the symlink, shows whether the fold point is still correct:
+    #
+    #   * in the plan — the run keeps the fold point. Each file below it is
+    #     already stowed through the directory symlink.
+    #   * not in the plan — the fold point is stale. The run resolved
+    #     individual files, because the directory holds a file that the run
+    #     must not stow. A gitignored file is the usual cause. The fold point
+    #     must come apart. If it stays, it serves that file from inside the
+    #     package.
     #
     # The walk is bounded at target_dir: link_path is constructed as
     # "$target_dir/...", and any fold point stow created lives below it.
@@ -234,7 +381,10 @@ stow_sh::__create_link() {
     # A symlink ancestor pointing elsewhere (e.g. a user's ~/.config →
     # /somewhere) is recorded — it disables the pure-bash relative-path
     # fast path below, since textual and canonical parents diverge there.
+    # An unfolded ancestor does not need that flag. It becomes a real
+    # directory, so the textual parent and the canonical parent agree.
     local _symlink_ancestor=false
+    local _stale_unfold=false
     local _check_dir="$link_dir"
     while [[ "$_check_dir" != "$target_dir" && "$_check_dir" != "/" ]]; do
         if [[ -L "$_check_dir" ]]; then
@@ -242,10 +392,15 @@ stow_sh::__create_link() {
             _ancestor_target="$(readlink -f "$_check_dir")"
             # Check if the ancestor symlink points into the package directory
             if [[ "$_ancestor_target" == "$pkg_dir"* ]]; then
-                stow_sh::__log_already_stowed "'$link_path' (via directory symlink at '$_check_dir')"
-                return 0
+                if [[ -n "${_stow_sh_planned_links[$_check_dir]+set}" ]]; then
+                    stow_sh::__log_already_stowed "'$link_path' (via directory symlink at '$_check_dir')"
+                    return 0
+                fi
+                stow_sh::__unfold_stale "$_check_dir" "$_ancestor_target" || return 1
+                _stale_unfold=true
+            else
+                _symlink_ancestor=true
             fi
-            _symlink_ancestor=true
         fi
         stow_sh::__dir_of "$_check_dir"
         _check_dir="$_stow_sh_dir"
@@ -263,8 +418,16 @@ stow_sh::__create_link() {
         rel_source="$(realpath -m --relative-to="$link_dir" "$source_path")"
     fi
 
-    # Check for conflicts at the link path
-    if [[ -L "$link_path" ]]; then
+    # Check for conflicts at the link path.
+    #
+    # A stale fold point above this path stops the checks. What the checks
+    # find through such a fold point is the content of the package, not a
+    # conflict. A real unfold empties that view. A dry-run pass keeps the
+    # symlink and still reads through it. A false conflict there stops the
+    # pre-flight of a clean run.
+    if [[ "$_stale_unfold" == true ]]; then
+        stow_sh::log debug 2 "Ignoring state at '$link_path' — visible only through an unfolded fold point"
+    elif [[ -L "$link_path" ]]; then
         # It's a symlink — check where it points. Fast path: the link
         # content matches exactly what we would create (the common case on
         # a repeated stow) — no canonicalization forks needed.
@@ -347,6 +510,7 @@ stow_sh::__create_link() {
             source_dir="$_stow_sh_dir"
             mkdir -p "$source_dir"
             mv "$link_path" "$source_path"
+            _stow_sh_pkg_mutated=true
         elif stow_sh::is_force; then
             # Safety guards run BEFORE the dry-run/pre-flight early return, so
             # an unresolvable --force conflict is caught during pre-flight and
