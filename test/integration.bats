@@ -628,6 +628,36 @@ teardown() {
     [ -f "$TARGET_DIR/.config/app/config.toml" ]
 }
 
+@test "integration: a package with no surviving candidate succeeds" {
+    local pkg="$SOURCE_DIR/pkg"
+    mkdir -p "$pkg/.config/app"
+    git -C "$pkg" init -q
+    # The filter removes every file in the package
+    printf '.config/\n' > "$pkg/.gitignore"
+    echo "cfg" > "$pkg/.config/app/config.toml"
+
+    cd "$pkg"
+    run "$STOW_SH" -g --no-xdg -d "$SOURCE_DIR" -t "$TARGET_DIR" -S pkg
+    [ "$status" -eq 0 ]
+    [[ "$output" != *"Aborting"* ]]
+    [ ! -e "$TARGET_DIR/.config" ]
+}
+
+@test "integration: an empty package does not block another package" {
+    local empty="$SOURCE_DIR/empty" full="$SOURCE_DIR/full"
+    mkdir -p "$empty/.config/app" "$full"
+    git -C "$empty" init -q
+    printf '.config/\n' > "$empty/.gitignore"
+    echo "cfg" > "$empty/.config/app/config.toml"
+    echo "rc" > "$full/.bashrc"
+
+    cd "$empty"
+    run "$STOW_SH" -g --no-xdg -d "$SOURCE_DIR" -t "$TARGET_DIR" -S empty full
+    [ "$status" -eq 0 ]
+    # The all-or-nothing pre-flight must not fail the whole run
+    [ -L "$TARGET_DIR/.bashrc" ]
+}
+
 # ============================================================
 # Error cases
 # ============================================================

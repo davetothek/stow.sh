@@ -114,11 +114,14 @@ stow_sh::resolve_package() {
         resolved=("${filtered[@]}")
     fi
 
-    # Output resolved targets
+    # Output resolved targets. The explicit return keeps the status of the
+    # last test out of the status of the function. A package that resolves
+    # to nothing is a valid result, not a failure.
     local target
     for target in "${resolved[@]}"; do
         [[ -n "$target" ]] && printf "%s\n" "$target"
     done
+    return 0
 }
 
 # Memoized front-end for resolve_package: sets _stow_sh_resolved.
