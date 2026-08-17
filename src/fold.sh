@@ -384,6 +384,10 @@ stow_sh::fold_targets() {
         fi
     done
 
-    # Output sorted results
+    # Output sorted results. printf writes one empty line for an empty array,
+    # and a caller reads that line as a target with an empty name.
+    if [[ ${#results[@]} -eq 0 ]]; then
+        return 0
+    fi
     printf "%s\n" "${results[@]}" | sort
 }
