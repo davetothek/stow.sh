@@ -11,6 +11,7 @@
     - [Condition + Fold Interaction](#condition-fold-interaction)
     - [Fold Resolution](#fold-resolution)
     - [Auto-Unfold](#auto-unfold)
+    - [Stale Fold Points](#stale-fold-points)
     - [Module Dependency Graph](#module-dependency-graph)
     - [Naming Conventions](#naming-conventions)
   - [Known Issues](#known-issues)
@@ -38,6 +39,7 @@ License: MIT | Author: David Kristiansen
 - **Directory folding**: symlink whole directories when possible
 - **XDG-aware folding**: fold barriers derived from `XDG_*` environment variables
 - **Auto-unfold**: when a fold point conflicts with an existing real directory at the target, automatically falls back to creating individual file symlinks inside it
+- **Stale fold points**: a fold that a later filtered file makes unsafe is unfolded on the next run, and the filtered file moves out of the package to the target
 
 ## Directory Structure
 
@@ -52,7 +54,7 @@ stow.sh/
 │   ├── filter.sh            # Path filtering engine (stowignore / git / regex / glob)
 │   ├── scan.sh              # Package directory scanner (find -type f)
 │   ├── fold.sh              # Directory folding + target resolution (annotation + barrier + exclusion aware)
-│   ├── stow.sh              # Stow/unstow operations (symlink creation/removal, conflict handling, auto-unfold)
+│   ├── stow.sh              # Stow/unstow operations (symlink creation/removal, conflict handling, auto-unfold, stale fold points)
 │   ├── xdg.sh               # XDG fold barrier detection from environment variables
 │   ├── dotfiles.sh          # --dotfiles name translation (dot- ↔ . per path component)
 │   ├── conditions.sh        # Annotation parsing, condition evaluation, plugin loader
@@ -73,14 +75,14 @@ stow.sh/
 │   ├── commit-msg           # Git hook — validates conventional commit format (install via: make hooks)
 │   └── pre-commit           # Git hook — runs shellcheck + tests before each commit
 ├── test/
-│   ├── args.bats            # Tests for args.sh (45 tests)
-│   ├── conditions.bats      # Tests for conditions, annotations, sanitization, plugins (39 tests)
+│   ├── args.bats            # Tests for args.sh (46 tests)
+│   ├── conditions.bats      # Tests for conditions, annotations, sanitization, plugins (42 tests)
 │   ├── dotfiles.bats        # Tests for dotfiles.sh: dot- ↔ . translation (12 tests)
-│   ├── filter.bats          # Tests for filter.sh (32 tests)
-│   ├── fold.bats            # Tests for fold.sh: folding, barriers, exclusions (33 tests)
-│   ├── integration.bats     # End-to-end tests via bin/stow.sh, incl. atomicity + dotfiles (76 tests)
+│   ├── filter.bats          # Tests for filter.sh (37 tests)
+│   ├── fold.bats            # Tests for fold.sh: folding, barriers, exclusions (38 tests)
+│   ├── integration.bats     # End-to-end tests via bin/stow.sh, incl. atomicity + dotfiles (88 tests)
 │   ├── scan.bats            # Tests for scan.sh (8 tests)
-│   ├── stow.bats            # Tests for stow.sh: stow/unstow operations (43 tests)
+│   ├── stow.bats            # Tests for stow.sh: stow/unstow operations (51 tests)
 │   ├── xdg.bats             # Tests for xdg.sh: XDG barrier computation (10 tests)
 │   └── fixtures/
 │       └── paths.bats       # Fixture: realistic dotfile path list (unused)
@@ -272,6 +274,48 @@ Example with `.config/opencode` (target has `bun.lock`, `node_modules/`):
   node_modules/               (untouched app directory)
 ```
 
+### Stale Fold Points
+
+A fold point stays correct only while every file in the folded directory
+belongs at the target. A file that the filter removes — a new gitignored file,
+or a new `.stowignore` pattern — makes the fold point stale. `fold_targets`
+already drops such a directory and resolves individual files instead, so the
+detection happens in `__create_link`.
+
+`stow_package` records the plan of the run in `_stow_sh_planned_links` (link
+paths) and `_stow_sh_planned_under` (their ancestor directories) before it
+creates a link. The ancestor walk in `__create_link` then reads the plan:
+
+- The ancestor symlink is in `_stow_sh_planned_links` — the run keeps the fold
+  point, and each file below it is already stowed.
+- The ancestor symlink is not in the plan — the fold point is stale.
+  `__unfold_stale` replaces it with a real directory. `__unfold_stale_walk`
+  then moves each entry that the plan does not hold out of the package and
+  into the target.
+
+The move (`evict` in the report) is the purpose of the operation. The stale
+fold pointed the write of an application at the package, so the file sits in
+the repository, where `git clean -xdf` removes it. The move puts the file at
+the target, where the application reads it, and leaves the repository clean.
+
+Two details keep the operation safe:
+
+- `_stow_sh_unfolded_folds` reports one unfold for each fold point. A dry-run
+  pass does not remove the symlink, so every file below it detects the same
+  stale fold point.
+- A stale fold point suppresses the conflict checks for paths below it. A
+  dry-run pass still reads through the symlink, and the package content that
+  shows through is not a conflict. Without the guard, the pre-flight of a
+  clean run aborts.
+
+`_stow_sh_pkg_mutated` marks a package whose directory the run changed, which
+also covers `--adopt`. `main()` drops the cached resolution of that package.
+
+**Limitation**: the detection needs a planned link below the fold point. A
+folded directory whose files all become filtered keeps its fold point, because
+the run resolves no target under it. `-D` and `-R` resolve the same empty list,
+so only a manual remove clears such a fold point.
+
 ### Module Dependency Graph
 
 ```
@@ -300,6 +344,10 @@ State variables use `_stow_sh_` prefix with getter functions (e.g. `stow_sh::get
 ### Medium
 
 1. **Subshell getter overhead**: every `$(stow_sh::get_*)` call forks a subshell.
+2. **Stale fold point with no planned link**: a folded directory whose files
+   all become filtered keeps its fold point. Detection runs in `__create_link`,
+   which needs a target below the fold point. A check that walks up from each
+   candidate that the filter dropped would find such a fold point.
 
 ## Development Guidelines
 
@@ -346,14 +394,15 @@ chore: bump version to 0.9.0
 - **Framework**: [bats-core](https://github.com/bats-core/bats-core)
 - **Run tests**: `make test` or `bats --verbose-run test/`
 - **Test location**: `test/*.bats`, fixtures in `test/fixtures/`
-- **Current coverage** (267 tests, all passing):
-  - `args.bats` — CLI argument parsing, short-flag expansion, path setup, getters, `-S`/`-D`/`-R` auto-discovery, `--dry-run` alias, mutual exclusion checks (45)
-  - `conditions.bats` — annotation parsing, path sanitization, condition evaluation, plugins, directory propagation (39)
-  - `filter.bats` — git-aware, regex, glob filtering, stowignore directory matching (25)
-  - `fold.bats` — directory folding with annotation taint, XDG barriers, filesystem completeness, exclusion awareness (33)
-  - `integration.bats` — end-to-end via `bin/stow.sh`: stow, unstow, restow, folding, XDG barriers, annotations, force, adopt, dry-run, ignore patterns, error cases, idempotency, self-stow, directory condition propagation, auto-unfold, `.stowignore`, report output, `-S`/`-D`/`-R` auto-discovery, ancestor fold point detection, mutual exclusion checks (64)
+- **Current coverage** (332 tests, all passing):
+  - `args.bats` — CLI argument parsing, short-flag expansion, path setup, getters, `-S`/`-D`/`-R` auto-discovery, `--dry-run` alias, mutual exclusion checks (46)
+  - `conditions.bats` — annotation parsing, path sanitization, condition evaluation, plugins, directory propagation (42)
+  - `dotfiles.bats` — `dot-` name translation in both directions (12)
+  - `filter.bats` — git-aware, regex, glob filtering, stowignore directory matching (37)
+  - `fold.bats` — directory folding with annotation taint, XDG barriers, filesystem completeness, exclusion awareness, empty candidate list (38)
+  - `integration.bats` — end-to-end via `bin/stow.sh`: stow, unstow, restow, folding, XDG barriers, annotations, force, adopt, dry-run, ignore patterns, error cases, idempotency, self-stow, directory condition propagation, auto-unfold, stale fold points, `.stowignore`, report output, `-S`/`-D`/`-R` auto-discovery, ancestor fold point detection, packages with no surviving candidate, mutual exclusion checks (88)
   - `scan.bats` — recursive scanning, dotfiles, annotated filenames, spaces (8)
-  - `stow.bats` — stow/unstow operations: symlinks, annotations, conflicts, force, adopt, dry-run, auto-unfold, ancestor fold point detection (43)
+  - `stow.bats` — stow/unstow operations: symlinks, annotations, conflicts, force, adopt, dry-run, auto-unfold, ancestor fold point detection, stale fold points and eviction (51)
   - `xdg.bats` — XDG barrier computation from environment variables (10)
 
 ### When Making Changes

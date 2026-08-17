@@ -39,6 +39,7 @@
 - [Directory Folding](#directory-folding)
   - [XDG fold barriers](#xdg-fold-barriers)
   - [Auto-unfold](#auto-unfold)
+  - [Stale fold points](#stale-fold-points)
 - [Contributing](#contributing)
 - [License](#license)
 - [Acknowledgements](#acknowledgements)
@@ -87,6 +88,7 @@ conflict handling — plus extras aimed at dotfiles:
 - Regex (`-i`) and glob (`-I`) ignore patterns on the command line
 - XDG-aware directory folding -- `XDG_*` directories stay real, their children can still fold
 - Auto-unfold -- falls back to individual symlinks when a target directory already exists
+- Stale fold points -- a fold that a later ignored file makes unsafe is unfolded on the next run
 - Pluggable condition predicates as shell functions
 - Atomic by default -- if any conflict is detected, nothing is changed (see below)
 - Pure Bash 4+, no external dependencies (GNU Stow requires Perl)
@@ -425,6 +427,26 @@ Disable with `--no-xdg`.
 ### Auto-unfold
 
 When a fold point conflicts with an existing real directory (e.g. `~/.gnupg` has private keys), stow.sh falls back to individual symlinks inside it. Child directories that don't exist at the target are still folded.
+
+### Stale fold points
+
+A fold is only correct while every file in the directory belongs at the target. A file that the filter removes -- a new gitignored file, or a new `.stowignore` pattern -- makes the fold unsafe, and the next run takes it apart:
+
+```
+# An earlier run folded the directory, and the app wrote local.conf through it:
+~/.config/app -> dotfiles/dot-config/app
+
+$ stow.sh -S dotfiles
++ unfold ~/.config/app (stale fold point)
++ evict dotfiles/dot-config/app/local.conf -> ~/.config/app/local.conf
++ ~/.config/app/config.toml -> ../../dotfiles/dot-config/app/config.toml
+```
+
+The unfold moves the filtered file out of the package and into the target. This is the point of the operation: the fold pointed the application's write at the package, so the file sat inside the repository, where `git clean -xdf` removes it. After the unfold it is a plain local file at the target, and the application still finds it.
+
+`-n`/`--dry-run` reports the unfold and each move, and changes nothing.
+
+This removes the need for `mkdir -p` calls in a bootstrap script whose only purpose is to pre-create a directory so it cannot fold.
 
 ## Contributing
 

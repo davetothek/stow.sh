@@ -226,10 +226,11 @@ stow_sh::__apply_operations() {
         stow_sh::unstow_package "$pkg_dir" "$target_dir" "${unstow_resolved[@]}" || had_error=true
         stow_sh::stow_package "$pkg_dir" "$target_dir" "${stow_resolved[@]}" || had_error=true
 
-        # --adopt is the only operation that mutates a package directory;
-        # drop its cached resolution so a later operation on the same
-        # package (e.g. listed under both -R and -S) re-scans it.
-        if stow_sh::is_adopt && ! stow_sh::is_dry_run; then
+        # Two operations change a package directory. --adopt moves files in,
+        # and a stale unfold moves files out. Drop the cached resolution, so
+        # a later operation on the same package scans it again. One package
+        # can appear under both -R and -S.
+        if [[ "$_stow_sh_pkg_mutated" == true ]] && ! stow_sh::is_dry_run; then
             unset "_stow_sh_resolve_cache[fold:$pkg_dir]" "_stow_sh_resolve_cache[no-fold:$pkg_dir]"
         fi
     done
@@ -281,8 +282,8 @@ stow_sh::__apply_operations() {
 
         stow_sh::stow_package "$pkg_dir" "$target_dir" "${resolved[@]}" || had_error=true
 
-        # See restow loop: adoption mutates the package — invalidate.
-        if stow_sh::is_adopt && ! stow_sh::is_dry_run; then
+        # See the restow loop. --adopt and a stale unfold change the package.
+        if [[ "$_stow_sh_pkg_mutated" == true ]] && ! stow_sh::is_dry_run; then
             unset "_stow_sh_resolve_cache[fold:$pkg_dir]" "_stow_sh_resolve_cache[no-fold:$pkg_dir]"
         fi
     done
