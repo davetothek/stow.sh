@@ -653,3 +653,12 @@ fold_all() {
     [ "${#lines[@]}" -eq 1 ]
     [ "${lines[0]}" = "a" ]
 }
+
+@test "fold_targets writes no line for an empty candidate list" {
+    # resolve_package maps the output into an array. One empty line becomes a
+    # target with an empty name. `run` strips trailing newlines, so read the
+    # output the way the caller reads it.
+    local -a resolved
+    mapfile -t resolved < <(stow_sh::fold_targets "$TEST_PKG" --)
+    [ "${#resolved[@]}" -eq 0 ]
+}

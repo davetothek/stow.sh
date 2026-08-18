@@ -628,6 +628,147 @@ teardown() {
     [ -f "$TARGET_DIR/.config/app/config.toml" ]
 }
 
+@test "integration: a package with no surviving candidate succeeds" {
+    local pkg="$SOURCE_DIR/pkg"
+    mkdir -p "$pkg/.config/app"
+    git -C "$pkg" init -q
+    # The filter removes every file in the package
+    printf '.config/\n' > "$pkg/.gitignore"
+    echo "cfg" > "$pkg/.config/app/config.toml"
+
+    cd "$pkg"
+    run "$STOW_SH" -g --no-xdg -d "$SOURCE_DIR" -t "$TARGET_DIR" -S pkg
+    [ "$status" -eq 0 ]
+    [[ "$output" != *"Aborting"* ]]
+    [ ! -e "$TARGET_DIR/.config" ]
+}
+
+@test "integration: an empty package does not block another package" {
+    local empty="$SOURCE_DIR/empty" full="$SOURCE_DIR/full"
+    mkdir -p "$empty/.config/app" "$full"
+    git -C "$empty" init -q
+    printf '.config/\n' > "$empty/.gitignore"
+    echo "cfg" > "$empty/.config/app/config.toml"
+    echo "rc" > "$full/.bashrc"
+
+    cd "$empty"
+    run "$STOW_SH" -g --no-xdg -d "$SOURCE_DIR" -t "$TARGET_DIR" -S empty full
+    [ "$status" -eq 0 ]
+    # The all-or-nothing pre-flight must not fail the whole run
+    [ -L "$TARGET_DIR/.bashrc" ]
+}
+
+# ============================================================
+# Stale fold points
+# ============================================================
+#
+# A fold point that a clean directory earned must not stay after a filtered
+# file appears in that directory. Such a fold point serves the file from
+# inside the repository, where `git clean` removes it.
+
+@test "integration: re-stow unfolds a fold made unsafe by a new ignored file" {
+    local pkg="$SOURCE_DIR/pkg"
+    mkdir -p "$pkg/.config/app"
+    git -C "$pkg" init -q
+    printf '.config/app/local.conf\n' > "$pkg/.gitignore"
+    echo "cfg" > "$pkg/.config/app/config.toml"
+
+    cd "$pkg"
+    # The first run finds no ignored file, so the tree folds
+    run "$STOW_SH" -g --no-xdg -d "$SOURCE_DIR" -t "$TARGET_DIR" -S pkg
+    [ "$status" -eq 0 ]
+    [ -L "$TARGET_DIR/.config" ]
+
+    # The application writes its ignored file through the fold point. The
+    # file lands in the package. The unfold exists to correct this.
+    echo "local" > "$TARGET_DIR/.config/app/local.conf"
+    [ -f "$pkg/.config/app/local.conf" ]
+
+    # The second run finds a fold point that is no longer safe
+    run "$STOW_SH" -g --no-xdg -d "$SOURCE_DIR" -t "$TARGET_DIR" -S pkg
+    [ "$status" -eq 0 ]
+
+    # Real directories lead to the file, and the tracked file gets a link
+    [ -d "$TARGET_DIR/.config" ] && [ ! -L "$TARGET_DIR/.config" ]
+    [ -d "$TARGET_DIR/.config/app" ] && [ ! -L "$TARGET_DIR/.config/app" ]
+    [ -L "$TARGET_DIR/.config/app/config.toml" ]
+
+    # The ignored file is a plain local file at the target, out of the repo
+    [ -f "$TARGET_DIR/.config/app/local.conf" ]
+    [ ! -L "$TARGET_DIR/.config/app/local.conf" ]
+    [ "$(cat "$TARGET_DIR/.config/app/local.conf")" = "local" ]
+    [ ! -e "$pkg/.config/app/local.conf" ]
+
+    # git clean does not reach the file now
+    run git -C "$pkg" clean -xdn
+    [ "$status" -eq 0 ]
+    [[ "$output" != *"local.conf"* ]]
+}
+
+@test "integration: dry-run reports a stale fold instead of printing nothing" {
+    local pkg="$SOURCE_DIR/pkg"
+    mkdir -p "$pkg/.config/app"
+    git -C "$pkg" init -q
+    printf '.config/app/local.conf\n' > "$pkg/.gitignore"
+    echo "cfg" > "$pkg/.config/app/config.toml"
+
+    cd "$pkg"
+    run "$STOW_SH" -g --no-xdg -d "$SOURCE_DIR" -t "$TARGET_DIR" -S pkg
+    [ "$status" -eq 0 ]
+    echo "local" > "$TARGET_DIR/.config/app/local.conf"
+
+    run "$STOW_SH" -g --no-xdg -n -d "$SOURCE_DIR" -t "$TARGET_DIR" -S pkg
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"WOULD unfold"* ]]
+    [[ "$output" == *"WOULD evict"* ]]
+
+    # The dry run changes nothing
+    [ -L "$TARGET_DIR/.config" ]
+    [ -f "$pkg/.config/app/local.conf" ]
+}
+
+@test "integration: stale unfold is idempotent on a third run" {
+    local pkg="$SOURCE_DIR/pkg"
+    mkdir -p "$pkg/.config/app"
+    git -C "$pkg" init -q
+    printf '.config/app/local.conf\n' > "$pkg/.gitignore"
+    echo "cfg" > "$pkg/.config/app/config.toml"
+
+    cd "$pkg"
+    run "$STOW_SH" -g --no-xdg -d "$SOURCE_DIR" -t "$TARGET_DIR" -S pkg
+    [ "$status" -eq 0 ]
+    echo "local" > "$TARGET_DIR/.config/app/local.conf"
+    run "$STOW_SH" -g --no-xdg -d "$SOURCE_DIR" -t "$TARGET_DIR" -S pkg
+    [ "$status" -eq 0 ]
+
+    # The third run has no work left. It must not disturb the local file.
+    run "$STOW_SH" -g --no-xdg -d "$SOURCE_DIR" -t "$TARGET_DIR" -S pkg
+    [ "$status" -eq 0 ]
+    [[ "$output" != *"unfold"* ]]
+    [[ "$output" != *"evict"* ]]
+    [ "$(cat "$TARGET_DIR/.config/app/local.conf")" = "local" ]
+    [ -L "$TARGET_DIR/.config/app/config.toml" ]
+}
+
+@test "integration: a fold that is still safe is left alone" {
+    local pkg="$SOURCE_DIR/pkg"
+    mkdir -p "$pkg/.config/app"
+    git -C "$pkg" init -q
+    : > "$pkg/.gitignore"
+    echo "cfg" > "$pkg/.config/app/config.toml"
+
+    cd "$pkg"
+    run "$STOW_SH" -g --no-xdg -d "$SOURCE_DIR" -t "$TARGET_DIR" -S pkg
+    [ "$status" -eq 0 ]
+    [ -L "$TARGET_DIR/.config" ]
+
+    # A second run must keep a fold point that is still the correct result
+    run "$STOW_SH" -g --no-xdg -d "$SOURCE_DIR" -t "$TARGET_DIR" -S pkg
+    [ "$status" -eq 0 ]
+    [[ "$output" != *"unfold"* ]]
+    [ -L "$TARGET_DIR/.config" ]
+}
+
 # ============================================================
 # Error cases
 # ============================================================
