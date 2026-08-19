@@ -887,6 +887,30 @@ teardown() {
     [ ! -e "$PKG_DIR/.config/app/local.conf" ]
 }
 
+@test "stow_package sweep keeps a fold point below a planned fold that auto-unfolds" {
+    mkdir -p "$PKG_DIR/.pi/agent/skills/commit"
+    git -C "$PKG_DIR" init -q
+    echo "settings" > "$PKG_DIR/.pi/agent/settings.json"
+    echo "skill" > "$PKG_DIR/.pi/agent/skills/commit/SKILL.md"
+    git -C "$PKG_DIR" add -A
+    git -C "$PKG_DIR" -c user.email=t@t -c user.name=t commit -qm init
+
+    # An earlier run auto-unfolded .pi and .pi/agent into real directories
+    # at the target and created the deeper fold point for skills.
+    mkdir -p "$TARGET_DIR/.pi/agent"
+    ln -s "$PKG_DIR/.pi/agent/settings.json" "$TARGET_DIR/.pi/agent/settings.json"
+    ln -s "$PKG_DIR/.pi/agent/skills" "$TARGET_DIR/.pi/agent/skills"
+
+    # The plan holds the whole-package fold. The link loop auto-unfolds it,
+    # because the target directories are real. The sweep must not call the
+    # deeper fold point stale — it lies below the planned link.
+    run stow_sh::stow_package "$PKG_DIR" "$TARGET_DIR" ".pi"
+    [ "$status" -eq 0 ]
+    [[ "$output" != *"Refusing to evict"* ]]
+    [ -L "$TARGET_DIR/.pi/agent/skills" ]
+    [ -f "$PKG_DIR/.pi/agent/skills/commit/SKILL.md" ]
+}
+
 @test "stow_package sweep leaves a planned fold point alone" {
     mkdir -p "$PKG_DIR/.appdir"
     git -C "$PKG_DIR" init -q

@@ -258,8 +258,10 @@ stow_sh::unstow_package() {
 # the fold points directly: for each package directory, compute its link
 # path and look at the target.
 #
-#   * A symlink into the package that the plan holds — a correct fold
-#     point. Prune: everything below it is served through the symlink.
+#   * A path the plan holds — prune. As a symlink, it is a correct fold
+#     point that serves everything below it. As a real directory, the
+#     link loop auto-unfolds it and links its children, so every fold
+#     point below it serves planned content.
 #   * A symlink into the package that the plan does not hold — stale.
 #     __unfold_stale takes it apart under the usual rules (eviction,
 #     the tracked-file guard, --no-evict, dry-run).
@@ -290,8 +292,10 @@ stow_sh::__sweep_stale_folds() {
         stow_sh::__link_rel "$child_rel"
         link_path="$target_dir/$_stow_sh_link_rel"
 
+        # The plan covers this path — prune, whatever its current form.
+        [[ -n "${_stow_sh_planned_links[$link_path]+set}" ]] && continue
+
         if [[ -L "$link_path" ]]; then
-            [[ -n "${_stow_sh_planned_links[$link_path]+set}" ]] && continue
             local _sweep_target
             _sweep_target="$(readlink -f "$link_path")"
             if [[ "$_sweep_target" == "$pkg_dir"* ]]; then
