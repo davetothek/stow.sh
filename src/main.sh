@@ -93,7 +93,7 @@ stow_sh::resolve_package() {
     # Filter
     stow_sh::log debug 2 "Filtering candidates..."
     local -a filtered
-    mapfile -t filtered < <(printf "%s\n" "${relative_entries[@]}" | stow_sh::filter_candidates)
+    mapfile -t filtered < <(printf "%s\n" "${relative_entries[@]}" | stow_sh::filter_candidates "$pkg_dir")
 
     if [[ $(stow_sh::get_debug) -ge 3 ]]; then
         stow_sh::log debug 3 "Filtered candidates (${#filtered[@]}):"
