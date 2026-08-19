@@ -1017,6 +1017,49 @@ teardown() {
     [ -f "$PKG_DIR/.appdir/notes.md" ]
 }
 
+@test "stow_package stale unfold links a tracked symlink at the target" {
+    mkdir -p "$PKG_DIR/.appdir"
+    git -C "$PKG_DIR" init -q
+    echo "cfg" > "$PKG_DIR/.appdir/config.toml"
+    ln -s config.toml "$PKG_DIR/.appdir/alias.toml"
+    git -C "$PKG_DIR" add -A
+    git -C "$PKG_DIR" -c user.email=t@t -c user.name=t commit -qm init
+    echo "state" > "$PKG_DIR/.appdir/state.db"
+
+    ln -s "$PKG_DIR/.appdir" "$TARGET_DIR/.appdir"
+
+    # The plan holds config.toml only — the scan never emits symlinks. The
+    # unfold must not refuse the tracked symlink: it stays in the package
+    # and gets a link at the target, so the path it served keeps resolving.
+    run stow_sh::stow_package "$PKG_DIR" "$TARGET_DIR" ".appdir/config.toml"
+    [ "$status" -eq 0 ]
+    [[ "$output" != *"Refusing to evict"* ]]
+
+    [ -L "$PKG_DIR/.appdir/alias.toml" ]
+    [ -L "$TARGET_DIR/.appdir/alias.toml" ]
+    [ "$(readlink -f "$TARGET_DIR/.appdir/alias.toml")" = "$(readlink -f "$PKG_DIR/.appdir/config.toml")" ]
+
+    # The untracked file still moves out of the package
+    [ -f "$TARGET_DIR/.appdir/state.db" ]
+    [ ! -e "$PKG_DIR/.appdir/state.db" ]
+}
+
+@test "stow_package stale unfold evicts an untracked symlink" {
+    mkdir -p "$PKG_DIR/.appdir"
+    git -C "$PKG_DIR" init -q
+    echo "cfg" > "$PKG_DIR/.appdir/config.toml"
+    ln -s /usr/lib/systemd/user/foo.service "$PKG_DIR/.appdir/foo.service"
+
+    ln -s "$PKG_DIR/.appdir" "$TARGET_DIR/.appdir"
+
+    # An untracked symlink is application state — it moves to the target.
+    run stow_sh::stow_package "$PKG_DIR" "$TARGET_DIR" ".appdir/config.toml"
+    [ "$status" -eq 0 ]
+    [ -L "$TARGET_DIR/.appdir/foo.service" ]
+    [ "$(readlink "$TARGET_DIR/.appdir/foo.service")" = "/usr/lib/systemd/user/foo.service" ]
+    [ ! -e "$PKG_DIR/.appdir/foo.service" ] && [ ! -L "$PKG_DIR/.appdir/foo.service" ]
+}
+
 @test "stow_package --no-evict keeps a stale fold point and warns" {
     _stow_sh_evict=false
     mkdir -p "$PKG_DIR/.appdir"
