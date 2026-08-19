@@ -1,3 +1,11 @@
+## v0.20.0 (2026-08-19)
+
+### Fix
+
+- **filter**: anchor git filtering at the package dir
+- **stow**: link a tracked symlink at the target during a stale unfold
+- **stow**: prune the stale sweep at every planned path
+
 ## v0.19.0 (2026-08-19)
 
 ### Feat
