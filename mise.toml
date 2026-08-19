@@ -11,8 +11,9 @@
 # them here puts both on PATH on cd into the repo and keeps contributors on
 # the same tools.
 #
-# CI installs the same two from apt (see .github/workflows/ci.yml) rather
-# than bootstrapping mise on the runner.
+# CI uses the shellcheck from the runner image and installs bats from a
+# bats-core clone (see .github/workflows/ci.yml) rather than bootstrapping
+# mise on the runner.
 
 [tools]
 bats = "latest"

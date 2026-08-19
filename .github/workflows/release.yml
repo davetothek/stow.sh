@@ -9,17 +9,22 @@ on:
 permissions:
   contents: write
 
+# No job installs packages through apt — see ci.yml. The runner image
+# ships shellcheck, and bats installs from a github.com clone.
 jobs:
   release:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Install tools
+      - name: Install bats
+        timeout-minutes: 4
         run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq bats shellcheck
+          git clone --depth 1 --branch v1.11.0 https://github.com/bats-core/bats-core.git /tmp/bats-core
+          sudo /tmp/bats-core/install.sh /usr/local
+          bats --version
 
       - name: Lint
         run: shellcheck src/*.sh bin/*.sh conditions.d/*.sh scripts/*.sh hooks/*
