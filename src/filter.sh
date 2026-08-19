@@ -224,20 +224,16 @@ stow_sh::git_should_ignore() {
 # parses the output to determine which paths are ignored. Negation
 # patterns (lines starting with !) are handled correctly.
 #
-# Usage: stow_sh::__build_git_ignored_set paths_array ignored_set_name
-#   paths_array — name of array containing relative paths to check
+# Usage: stow_sh::__build_git_ignored_set paths_array ignored_set_name [pkg_dir]
+#   paths_array — name of array containing package-relative paths to check
 #   ignored_set_name — name of associative array to populate (path → 1)
+#   pkg_dir — directory the paths are relative to (default: cwd). Git runs
+#             there, so the paths resolve against the package, not the cwd.
 stow_sh::__build_git_ignored_set() {
     local -n _paths="$1"
     local -n _ignored="$2"
+    local pkg_dir="${3:-.}"
 
-    local relpath="."
-    local git_root
-    if git_root=$(git rev-parse --show-toplevel 2> /dev/null); then
-        relpath=$(realpath --relative-to="$git_root" .)
-    fi
-
-    # Build input: prepend relpath if not "."
     local -a check_paths=()
     local p
     for p in "${_paths[@]}"; do
@@ -252,11 +248,7 @@ stow_sh::__build_git_ignored_set() {
             stow_sh::log debug 3 "Git metadata (never stowed): '$p'"
             continue
         fi
-        if [[ "$relpath" == "." ]]; then
-            check_paths+=("$p")
-        else
-            check_paths+=("$relpath/$p")
-        fi
+        check_paths+=("$p")
     done
 
     [[ ${#check_paths[@]} -eq 0 ]] && return 0
@@ -269,7 +261,7 @@ stow_sh::__build_git_ignored_set() {
     #   clean:    "::\tpath"
     local output
     output=$(printf '%s\n' "${check_paths[@]}" \
-        | git check-ignore -n --verbose --stdin 2> /dev/null) || true
+        | git -C "$pkg_dir" check-ignore -n --verbose --stdin 2> /dev/null) || true
 
     local line rule tab_part
     while IFS= read -r line; do
@@ -277,11 +269,6 @@ stow_sh::__build_git_ignored_set() {
         # Split on tab: left side is source:linenum:pattern, right side is pathname
         rule="${line%%	*}"
         tab_part="${line#*	}"
-
-        # Strip relpath prefix to get back to the original relative path
-        if [[ "$relpath" != "." ]]; then
-            tab_part="${tab_part#"$relpath"/}"
-        fi
 
         if [[ "$rule" == "::" ]]; then
             # Not ignored — skip
@@ -335,9 +322,12 @@ stow_sh::match_glob_ignore() {
 # Git filtering is done in a single batched call rather than per-file
 # to avoid O(n) subprocess forks.
 #
-# Usage: printf '%s\n' "${paths[@]}" | stow_sh::filter_candidates
+# Usage: printf '%s\n' "${paths[@]}" | stow_sh::filter_candidates [pkg_dir]
+#   pkg_dir — directory the paths are relative to (default: cwd)
 # Output: surviving paths, one per line
 stow_sh::filter_candidates() {
+    local pkg_dir="${1:-.}"
+
     # Read all paths into an array first (needed for batched git check)
     local -a all_paths=()
     while IFS= read -r path; do
@@ -347,7 +337,7 @@ stow_sh::filter_candidates() {
     # Build git-ignored set in one batched call
     local -A git_ignored=()
     if [[ "$_stow_sh_git_mode" == true ]]; then
-        stow_sh::__build_git_ignored_set all_paths git_ignored
+        stow_sh::__build_git_ignored_set all_paths git_ignored "$pkg_dir"
     fi
 
     # Filter each path through all layers

@@ -163,6 +163,23 @@ setup() {
   [[ "$result" != *".local/bin/1password.sh"* ]]
 }
 
+@test "stow_sh::filter_candidates anchors git filtering at the package dir" {
+  repo=$(mktemp -d)
+  git -C "$repo" init -q
+  mkdir -p "$repo/src/app"
+  echo 'ignored.dat' > "$repo/src/.gitignore"
+  touch "$repo/src/app/ignored.dat" "$repo/src/app/kept.conf"
+
+  # The cwd is a different repository. The paths are relative to the
+  # package dir, so git must evaluate them there.
+  input=$'app/ignored.dat\napp/kept.conf'
+  run bash -c "source '$BATS_TEST_DIRNAME/../src/log.sh'; source '$BATS_TEST_DIRNAME/../src/filter.sh'; declare -a _stow_sh_ignore=(); declare -a _stow_sh_ignore_glob=(); _stow_sh_git_mode=true; stow_sh::filter_candidates '$repo/src' <<< \"$input\""
+  rm -rf "$repo"
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"ignored.dat"* ]]
+  [[ "$output" == *"kept.conf"* ]]
+}
+
 @test "stow_sh::filter_candidates handles glob ignore" {
   input=$'foo.tmp\nbar.txt'
   run bash -c "source '$BATS_TEST_DIRNAME/../src/log.sh'; source '$BATS_TEST_DIRNAME/../src/filter.sh'; declare -a _stow_sh_ignore=(); declare -a _stow_sh_ignore_glob=(\"*.tmp\"); _stow_sh_git_mode=false; stow_sh::filter_candidates <<< \"$input\""

@@ -258,8 +258,10 @@ stow_sh::unstow_package() {
 # the fold points directly: for each package directory, compute its link
 # path and look at the target.
 #
-#   * A symlink into the package that the plan holds — a correct fold
-#     point. Prune: everything below it is served through the symlink.
+#   * A path the plan holds — prune. As a symlink, it is a correct fold
+#     point that serves everything below it. As a real directory, the
+#     link loop auto-unfolds it and links its children, so every fold
+#     point below it serves planned content.
 #   * A symlink into the package that the plan does not hold — stale.
 #     __unfold_stale takes it apart under the usual rules (eviction,
 #     the tracked-file guard, --no-evict, dry-run).
@@ -290,8 +292,10 @@ stow_sh::__sweep_stale_folds() {
         stow_sh::__link_rel "$child_rel"
         link_path="$target_dir/$_stow_sh_link_rel"
 
+        # The plan covers this path — prune, whatever its current form.
+        [[ -n "${_stow_sh_planned_links[$link_path]+set}" ]] && continue
+
         if [[ -L "$link_path" ]]; then
-            [[ -n "${_stow_sh_planned_links[$link_path]+set}" ]] && continue
             local _sweep_target
             _sweep_target="$(readlink -f "$link_path")"
             if [[ "$_sweep_target" == "$pkg_dir"* ]]; then
@@ -413,6 +417,10 @@ stow_sh::__unfold_stale() {
 # pre-flight turns it into an atomic abort. An untracked file is the
 # application state that #4 describes, and it moves.
 #
+# A tracked symlink is the exception: the scan never emits symlinks, so
+# no plan can hold one, and only the fold point served it. The walk keeps
+# it in the package and creates a link to it at the target (#11).
+#
 # Usage: stow_sh::__unfold_stale_walk source_dir dest_dir rel_prefix
 #   rel_prefix — path of source_dir relative to the fold point's source,
 #                or "" at the fold point itself. Keys _stow_sh_evict_tracked.
@@ -443,6 +451,28 @@ stow_sh::__unfold_stale_walk() {
                 fi
                 stow_sh::__unfold_stale_walk "$entry" "$dest" "$rel" || had_error=true
             fi
+            continue
+        fi
+
+        # A tracked symlink is package content, but the scan never emits
+        # symlinks, so no plan holds it — only the fold point served it.
+        # Keep it in the package and link it at the target, so the path
+        # it served keeps resolving.
+        if [[ -L "$entry" && -n "${_stow_sh_evict_tracked[$rel]+set}" ]]; then
+            if stow_sh::is_dry_run; then
+                stow_sh::log debug 1 "WOULD link tracked symlink: '$dest' -> '$entry'"
+                stow_sh::report "?" "WOULD link $dest -> $entry"
+                continue
+            fi
+            if [[ -e "$dest" || -L "$dest" ]]; then
+                stow_sh::log error "Refusing to link '$entry': '$dest' already exists"
+                had_error=true
+                continue
+            fi
+            stow_sh::__relpath "$dest_dir" "$entry"
+            stow_sh::log debug 1 "Linking tracked symlink: '$dest' -> '$entry'"
+            stow_sh::report "+" "$dest -> $_stow_sh_rel"
+            ln -s "$_stow_sh_rel" "$dest"
             continue
         fi
 

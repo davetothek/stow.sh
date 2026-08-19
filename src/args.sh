@@ -364,9 +364,13 @@ stow_sh::parse_args() {
         exit 1
     fi
 
-    # Auto-detect git mode when neither -g nor -G was given
+    # Auto-detect git mode when neither -g nor -G was given. Packages live
+    # in the source directory, so check there first. Fall back to the cwd
+    # for layouts where each package is its own repository and the user
+    # runs from inside one. The filter itself anchors at the package dir.
     if [[ "$explicit_git_flag" == false ]]; then
-        if git rev-parse --is-inside-work-tree &> /dev/null; then
+        if git -C "${_stow_sh_dir:-.}" rev-parse --is-inside-work-tree &> /dev/null \
+            || git rev-parse --is-inside-work-tree &> /dev/null; then
             _stow_sh_git_mode=true
             stow_sh::log debug 2 "Auto-enabled git mode (inside git repo)"
         else
@@ -376,8 +380,9 @@ stow_sh::parse_args() {
     fi
 
     if [[ "$_stow_sh_git_mode" == true ]]; then
-        if ! git rev-parse --show-toplevel &> /dev/null; then
-            stow_sh::log error "Cannot enable --git: not inside a git repository"
+        if ! git -C "${_stow_sh_dir:-.}" rev-parse --show-toplevel &> /dev/null \
+            && ! git rev-parse --show-toplevel &> /dev/null; then
+            stow_sh::log error "Cannot enable --git: neither the source dir nor the cwd is inside a git repository"
             exit 1
         fi
         stow_sh::log debug 2 "Git-aware mode enabled"

@@ -195,6 +195,17 @@ parse_no_git() {
     [[ "$(stow_sh::get_git_mode)" == "true" ]]
 }
 
+@test "parse_args: git auto-detect anchors at the source dir" {
+    local tmp
+    tmp="$(mktemp -d)"
+    mkdir -p "$tmp/repo/pkg" "$tmp/elsewhere"
+    git -C "$tmp/repo" init -q
+    cd "$tmp/elsewhere"
+    stow_sh::parse_args -d "$tmp/repo" -S pkg
+    [[ "$(stow_sh::get_git_mode)" == "true" ]]
+    rm -rf "$tmp"
+}
+
 @test "parse_args: -G disables git mode" {
     stow_sh::parse_args -G -S pkg
     [[ "$(stow_sh::get_git_mode)" == "false" ]]

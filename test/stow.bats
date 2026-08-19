@@ -887,6 +887,30 @@ teardown() {
     [ ! -e "$PKG_DIR/.config/app/local.conf" ]
 }
 
+@test "stow_package sweep keeps a fold point below a planned fold that auto-unfolds" {
+    mkdir -p "$PKG_DIR/.pi/agent/skills/commit"
+    git -C "$PKG_DIR" init -q
+    echo "settings" > "$PKG_DIR/.pi/agent/settings.json"
+    echo "skill" > "$PKG_DIR/.pi/agent/skills/commit/SKILL.md"
+    git -C "$PKG_DIR" add -A
+    git -C "$PKG_DIR" -c user.email=t@t -c user.name=t commit -qm init
+
+    # An earlier run auto-unfolded .pi and .pi/agent into real directories
+    # at the target and created the deeper fold point for skills.
+    mkdir -p "$TARGET_DIR/.pi/agent"
+    ln -s "$PKG_DIR/.pi/agent/settings.json" "$TARGET_DIR/.pi/agent/settings.json"
+    ln -s "$PKG_DIR/.pi/agent/skills" "$TARGET_DIR/.pi/agent/skills"
+
+    # The plan holds the whole-package fold. The link loop auto-unfolds it,
+    # because the target directories are real. The sweep must not call the
+    # deeper fold point stale — it lies below the planned link.
+    run stow_sh::stow_package "$PKG_DIR" "$TARGET_DIR" ".pi"
+    [ "$status" -eq 0 ]
+    [[ "$output" != *"Refusing to evict"* ]]
+    [ -L "$TARGET_DIR/.pi/agent/skills" ]
+    [ -f "$PKG_DIR/.pi/agent/skills/commit/SKILL.md" ]
+}
+
 @test "stow_package sweep leaves a planned fold point alone" {
     mkdir -p "$PKG_DIR/.appdir"
     git -C "$PKG_DIR" init -q
@@ -991,6 +1015,49 @@ teardown() {
     [ "$status" -eq 1 ]
     [[ "$output" == *"Refusing to evict"* ]]
     [ -f "$PKG_DIR/.appdir/notes.md" ]
+}
+
+@test "stow_package stale unfold links a tracked symlink at the target" {
+    mkdir -p "$PKG_DIR/.appdir"
+    git -C "$PKG_DIR" init -q
+    echo "cfg" > "$PKG_DIR/.appdir/config.toml"
+    ln -s config.toml "$PKG_DIR/.appdir/alias.toml"
+    git -C "$PKG_DIR" add -A
+    git -C "$PKG_DIR" -c user.email=t@t -c user.name=t commit -qm init
+    echo "state" > "$PKG_DIR/.appdir/state.db"
+
+    ln -s "$PKG_DIR/.appdir" "$TARGET_DIR/.appdir"
+
+    # The plan holds config.toml only — the scan never emits symlinks. The
+    # unfold must not refuse the tracked symlink: it stays in the package
+    # and gets a link at the target, so the path it served keeps resolving.
+    run stow_sh::stow_package "$PKG_DIR" "$TARGET_DIR" ".appdir/config.toml"
+    [ "$status" -eq 0 ]
+    [[ "$output" != *"Refusing to evict"* ]]
+
+    [ -L "$PKG_DIR/.appdir/alias.toml" ]
+    [ -L "$TARGET_DIR/.appdir/alias.toml" ]
+    [ "$(readlink -f "$TARGET_DIR/.appdir/alias.toml")" = "$(readlink -f "$PKG_DIR/.appdir/config.toml")" ]
+
+    # The untracked file still moves out of the package
+    [ -f "$TARGET_DIR/.appdir/state.db" ]
+    [ ! -e "$PKG_DIR/.appdir/state.db" ]
+}
+
+@test "stow_package stale unfold evicts an untracked symlink" {
+    mkdir -p "$PKG_DIR/.appdir"
+    git -C "$PKG_DIR" init -q
+    echo "cfg" > "$PKG_DIR/.appdir/config.toml"
+    ln -s /usr/lib/systemd/user/foo.service "$PKG_DIR/.appdir/foo.service"
+
+    ln -s "$PKG_DIR/.appdir" "$TARGET_DIR/.appdir"
+
+    # An untracked symlink is application state — it moves to the target.
+    run stow_sh::stow_package "$PKG_DIR" "$TARGET_DIR" ".appdir/config.toml"
+    [ "$status" -eq 0 ]
+    [ -L "$TARGET_DIR/.appdir/foo.service" ]
+    [ "$(readlink "$TARGET_DIR/.appdir/foo.service")" = "/usr/lib/systemd/user/foo.service" ]
+    [ ! -e "$PKG_DIR/.appdir/foo.service" ] && [ ! -L "$PKG_DIR/.appdir/foo.service" ]
 }
 
 @test "stow_package --no-evict keeps a stale fold point and warns" {
