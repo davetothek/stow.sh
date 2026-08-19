@@ -17,15 +17,10 @@ concurrency:
 permissions:
   contents: read
 
-# A stalled apt mirror can hang an install step for hours. The Acquire
-# timeouts drop a dead connection fast, the retries pick a new one, and
-# the step timeout fails the job instead of holding the runner.
-env:
-  APT_OPTS: >-
-    -o Acquire::Retries=3
-    -o Acquire::http::Timeout=15
-    -o Acquire::https::Timeout=15
-
+# No job installs packages through apt. A wedged apt on the runner held
+# install steps until the six-hour limit. The runner image ships
+# shellcheck, and bats installs from a github.com clone — the one host a
+# runner can always reach. The timeouts bound any residual hang.
 jobs:
   lint:
     runs-on: ubuntu-latest
@@ -34,14 +29,10 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Install shellcheck
-        timeout-minutes: 4
-        run: |
-          sudo apt-get update -qq $APT_OPTS
-          sudo apt-get install -y -qq $APT_OPTS shellcheck
-
       - name: Run shellcheck
-        run: shellcheck src/*.sh bin/*.sh conditions.d/*.sh
+        run: |
+          shellcheck --version
+          shellcheck src/*.sh bin/*.sh conditions.d/*.sh
 
   test:
     runs-on: ubuntu-latest
@@ -53,8 +44,9 @@ jobs:
       - name: Install bats
         timeout-minutes: 4
         run: |
-          sudo apt-get update -qq $APT_OPTS
-          sudo apt-get install -y -qq $APT_OPTS bats
+          git clone --depth 1 --branch v1.11.0 https://github.com/bats-core/bats-core.git /tmp/bats-core
+          sudo /tmp/bats-core/install.sh /usr/local
+          bats --version
 
       - name: Run tests
         run: |
