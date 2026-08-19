@@ -850,6 +850,131 @@ teardown() {
     [ ! -e "$PKG_DIR/dot-appdir/local.conf" ]
 }
 
+@test "stow_package sweeps a stale fold with no planned link below it" {
+    mkdir -p "$PKG_DIR/.appdir"
+    git -C "$PKG_DIR" init -q
+    echo "a" > "$PKG_DIR/.appdir/a.conf"
+    echo "b" > "$PKG_DIR/.appdir/b.conf"
+
+    ln -s "$PKG_DIR/.appdir" "$TARGET_DIR/.appdir"
+
+    # The filter removed the whole subtree, so the run has no target below
+    # the fold point. The per-file walk never sees it — only the sweep does.
+    run stow_sh::stow_package "$PKG_DIR" "$TARGET_DIR"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"unfold"* ]]
+
+    [ -d "$TARGET_DIR/.appdir" ] && [ ! -L "$TARGET_DIR/.appdir" ]
+    [ -f "$TARGET_DIR/.appdir/a.conf" ] && [ ! -L "$TARGET_DIR/.appdir/a.conf" ]
+    [ -f "$TARGET_DIR/.appdir/b.conf" ]
+    [ ! -e "$PKG_DIR/.appdir/a.conf" ]
+    [ ! -e "$PKG_DIR/.appdir/b.conf" ]
+}
+
+@test "stow_package sweep finds a stale fold below a real target directory" {
+    mkdir -p "$PKG_DIR/.config/app"
+    git -C "$PKG_DIR" init -q
+    echo "local" > "$PKG_DIR/.config/app/local.conf"
+
+    # .config is a real directory at the target; the fold sits one level down
+    mkdir -p "$TARGET_DIR/.config"
+    ln -s "$PKG_DIR/.config/app" "$TARGET_DIR/.config/app"
+
+    run stow_sh::stow_package "$PKG_DIR" "$TARGET_DIR"
+    [ "$status" -eq 0 ]
+    [ -d "$TARGET_DIR/.config/app" ] && [ ! -L "$TARGET_DIR/.config/app" ]
+    [ -f "$TARGET_DIR/.config/app/local.conf" ]
+    [ ! -e "$PKG_DIR/.config/app/local.conf" ]
+}
+
+@test "stow_package sweep leaves a planned fold point alone" {
+    mkdir -p "$PKG_DIR/.appdir"
+    git -C "$PKG_DIR" init -q
+    echo "cfg" > "$PKG_DIR/.appdir/config.toml"
+
+    ln -s "$PKG_DIR/.appdir" "$TARGET_DIR/.appdir"
+
+    run stow_sh::stow_package "$PKG_DIR" "$TARGET_DIR" ".appdir"
+    [ "$status" -eq 0 ]
+    [[ "$output" != *"unfold"* ]]
+    [ -L "$TARGET_DIR/.appdir" ]
+}
+
+@test "stow_package sweep --dry-run reports and changes nothing" {
+    _stow_sh_dry_run=true
+    mkdir -p "$PKG_DIR/.appdir"
+    git -C "$PKG_DIR" init -q
+    echo "a" > "$PKG_DIR/.appdir/a.conf"
+
+    ln -s "$PKG_DIR/.appdir" "$TARGET_DIR/.appdir"
+
+    run stow_sh::stow_package "$PKG_DIR" "$TARGET_DIR"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"WOULD unfold"* ]]
+    [[ "$output" == *"WOULD evict"* ]]
+    [ -L "$TARGET_DIR/.appdir" ]
+    [ -f "$PKG_DIR/.appdir/a.conf" ]
+}
+
+@test "stow_package sweep refuses a fully tracked stale fold" {
+    mkdir -p "$PKG_DIR/.appdir"
+    git -C "$PKG_DIR" init -q
+    echo "doc" > "$PKG_DIR/.appdir/notes.md"
+    git -C "$PKG_DIR" add -A
+    git -C "$PKG_DIR" -c user.email=t@t -c user.name=t commit -qm init
+
+    ln -s "$PKG_DIR/.appdir" "$TARGET_DIR/.appdir"
+
+    run stow_sh::stow_package "$PKG_DIR" "$TARGET_DIR"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"Refusing to evict"* ]]
+    [ -f "$PKG_DIR/.appdir/notes.md" ]
+}
+
+@test "stow_package sweep honors --no-evict" {
+    _stow_sh_evict=false
+    mkdir -p "$PKG_DIR/.appdir"
+    git -C "$PKG_DIR" init -q
+    echo "a" > "$PKG_DIR/.appdir/a.conf"
+
+    ln -s "$PKG_DIR/.appdir" "$TARGET_DIR/.appdir"
+
+    run stow_sh::stow_package "$PKG_DIR" "$TARGET_DIR"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"Stale fold point kept"* ]]
+    [ -L "$TARGET_DIR/.appdir" ]
+    [ -f "$PKG_DIR/.appdir/a.conf" ]
+}
+
+@test "stow_package sweep translates dot- names under --dotfiles" {
+    _stow_sh_dotfiles=true
+    mkdir -p "$PKG_DIR/dot-appdir"
+    git -C "$PKG_DIR" init -q
+    echo "a" > "$PKG_DIR/dot-appdir/a.conf"
+
+    ln -s "$PKG_DIR/dot-appdir" "$TARGET_DIR/.appdir"
+
+    run stow_sh::stow_package "$PKG_DIR" "$TARGET_DIR"
+    [ "$status" -eq 0 ]
+    [ -d "$TARGET_DIR/.appdir" ] && [ ! -L "$TARGET_DIR/.appdir" ]
+    [ -f "$TARGET_DIR/.appdir/a.conf" ]
+    [ ! -e "$PKG_DIR/dot-appdir/a.conf" ]
+}
+
+@test "stow_package sweep skips a foreign symlink at the target" {
+    mkdir -p "$PKG_DIR/.appdir" "$TEST_DIR/elsewhere"
+    git -C "$PKG_DIR" init -q
+    echo "a" > "$PKG_DIR/.appdir/a.conf"
+
+    # The user's own symlink at the fold path points outside the package
+    ln -s "$TEST_DIR/elsewhere" "$TARGET_DIR/.appdir"
+
+    run stow_sh::stow_package "$PKG_DIR" "$TARGET_DIR"
+    [ "$status" -eq 0 ]
+    [[ "$output" != *"unfold"* ]]
+    [ "$(readlink "$TARGET_DIR/.appdir")" = "$TEST_DIR/elsewhere" ]
+}
+
 @test "stow_package stale unfold refuses to evict a tracked file" {
     mkdir -p "$PKG_DIR/.appdir"
     git -C "$PKG_DIR" init -q

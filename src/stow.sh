@@ -149,8 +149,6 @@ stow_sh::stow_package() {
     shift 2
     local -a resolved_targets=("$@")
 
-    local had_error=false
-
     stow_sh::log debug 1 "Stowing ${#resolved_targets[@]} targets from '$pkg_dir' into '$target_dir'"
 
     # Record the plan before the run creates a link. The run then checks each
@@ -176,6 +174,12 @@ stow_sh::stow_package() {
             _plan_dir="$_stow_sh_dir"
         done
     done
+
+    # Sweep for stale fold points before the link loop. The loop's own
+    # detection needs a planned link below a fold point, and a fold point
+    # whose whole subtree the filter removed has none.
+    local had_error=false
+    stow_sh::__sweep_stale_folds "$pkg_dir" "" "$target_dir" || had_error=true
 
     local target
     for target in "${resolved_targets[@]}"; do
@@ -245,6 +249,67 @@ stow_sh::unstow_package() {
 }
 
 # --- Internal helpers ---
+
+# Walk the package's directories and take apart each stale fold point.
+#
+# The per-file detection in __create_link needs a planned link below the
+# fold point. A fold point whose whole subtree the filter removed has no
+# planned link below it, so no file ever finds it (#5). This sweep checks
+# the fold points directly: for each package directory, compute its link
+# path and look at the target.
+#
+#   * A symlink into the package that the plan holds — a correct fold
+#     point. Prune: everything below it is served through the symlink.
+#   * A symlink into the package that the plan does not hold — stale.
+#     __unfold_stale takes it apart under the usual rules (eviction,
+#     the tracked-file guard, --no-evict, dry-run).
+#   * A real directory — descend: a deeper fold point can hide below it.
+#   * Anything else — prune. A foreign symlink is not stow's, and below a
+#     path that does not exist at the target, nothing is stowed.
+#
+# The walk descends only where the target mirrors the package with real
+# directories, so the cost is a few lstat calls per run.
+#
+# Usage: stow_sh::__sweep_stale_folds pkg_dir rel target_dir
+#   rel — package-relative directory, "" at the package root
+# Returns: 0 on success, 1 if __unfold_stale reported an error
+stow_sh::__sweep_stale_folds() {
+    local pkg_dir="$1"
+    local rel="$2"
+    local target_dir="$3"
+
+    local abs="$pkg_dir${rel:+/$rel}"
+    local had_error=false
+    local entry name child_rel link_path
+    for entry in "$abs"/* "$abs"/.*; do
+        [[ -d "$entry" && ! -L "$entry" ]] || continue
+        name="${entry##*/}"
+        [[ "$name" == "." || "$name" == ".." ]] && continue
+        [[ -z "$rel" && "$name" == ".git" ]] && continue
+        child_rel="${rel:+$rel/}$name"
+        stow_sh::__link_rel "$child_rel"
+        link_path="$target_dir/$_stow_sh_link_rel"
+
+        if [[ -L "$link_path" ]]; then
+            [[ -n "${_stow_sh_planned_links[$link_path]+set}" ]] && continue
+            local _sweep_target
+            _sweep_target="$(readlink -f "$link_path")"
+            if [[ "$_sweep_target" == "$pkg_dir"* ]]; then
+                stow_sh::__unfold_stale "$link_path" "$_sweep_target" || had_error=true
+            fi
+            # After an unfold, the target below holds only fresh content.
+            # A kept or foreign symlink hides nothing of stow's. No descent.
+            continue
+        fi
+
+        if [[ -d "$link_path" ]]; then
+            stow_sh::__sweep_stale_folds "$pkg_dir" "$child_rel" "$target_dir" || had_error=true
+        fi
+    done
+
+    [[ "$had_error" == true ]] && return 1
+    return 0
+}
 
 # Take a stale fold point apart. Replace the directory symlink with a real
 # directory. Then move each file that the run does not plan to link. The

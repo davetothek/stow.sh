@@ -80,9 +80,9 @@ stow.sh/
 │   ├── dotfiles.bats        # Tests for dotfiles.sh: dot- ↔ . translation (12 tests)
 │   ├── filter.bats          # Tests for filter.sh (37 tests)
 │   ├── fold.bats            # Tests for fold.sh: folding, barriers, exclusions (38 tests)
-│   ├── integration.bats     # End-to-end tests via bin/stow.sh, incl. atomicity + dotfiles (90 tests)
+│   ├── integration.bats     # End-to-end tests via bin/stow.sh, incl. atomicity + dotfiles (93 tests)
 │   ├── scan.bats            # Tests for scan.sh (8 tests)
-│   ├── stow.bats            # Tests for stow.sh: stow/unstow operations (54 tests)
+│   ├── stow.bats            # Tests for stow.sh: stow/unstow operations (62 tests)
 │   ├── xdg.bats             # Tests for xdg.sh: XDG barrier computation (10 tests)
 │   └── fixtures/
 │       └── paths.bats       # Fixture: realistic dotfile path list (unused)
@@ -327,10 +327,14 @@ Two details keep the operation safe:
 `_stow_sh_pkg_mutated` marks a package whose directory the run changed, which
 also covers `--adopt`. `main()` drops the cached resolution of that package.
 
-**Limitation**: the detection needs a planned link below the fold point. A
-folded directory whose files all become filtered keeps its fold point, because
-the run resolves no target under it. `-D` and `-R` resolve the same empty list,
-so only a manual remove clears such a fold point.
+**The sweep**: the per-file detection needs a planned link below the fold
+point, and a fold point whose whole subtree the filter removed has none (#5).
+`__sweep_stale_folds` closes that gap: before the link loop, it walks the
+package's directories, computes each one's link path, and hands any
+package-pointing symlink that the plan does not hold to `__unfold_stale`. It
+prunes at planned fold points, foreign symlinks, and paths absent from the
+target, so it costs a few lstat calls per run. Bare `-D` does not run the
+sweep — see Known Issues.
 
 ### Module Dependency Graph
 
@@ -360,10 +364,9 @@ State variables use `_stow_sh_` prefix with getter functions (e.g. `stow_sh::get
 ### Medium
 
 1. **Subshell getter overhead**: every `$(stow_sh::get_*)` call forks a subshell.
-2. **Stale fold point with no planned link**: a folded directory whose files
-   all become filtered keeps its fold point. Detection runs in `__create_link`,
-   which needs a target below the fold point. A check that walks up from each
-   candidate that the filter dropped would find such a fold point.
+2. **Unstow does not sweep**: a bare `-D` on a package whose folded directory
+   became fully filtered resolves zero targets and leaves the fold point.
+   A re-stow or restow clears it first (the sweep runs in `stow_package`).
 
 ## Development Guidelines
 
@@ -410,15 +413,15 @@ chore: bump version to 0.9.0
 - **Framework**: [bats-core](https://github.com/bats-core/bats-core)
 - **Run tests**: `make test` or `bats --verbose-run test/`
 - **Test location**: `test/*.bats`, fixtures in `test/fixtures/`
-- **Current coverage** (340 tests, all passing):
+- **Current coverage** (351 tests, all passing):
   - `args.bats` — CLI argument parsing, short-flag expansion, path setup, getters, `-S`/`-D`/`-R` auto-discovery, `--dry-run` alias, mutual exclusion checks, evict flags (49)
   - `conditions.bats` — annotation parsing, path sanitization, condition evaluation, plugins, directory propagation (42)
   - `dotfiles.bats` — `dot-` name translation in both directions (12)
   - `filter.bats` — git-aware, regex, glob filtering, stowignore directory matching (37)
   - `fold.bats` — directory folding with annotation taint, XDG barriers, filesystem completeness, exclusion awareness, empty candidate list (38)
-  - `integration.bats` — end-to-end via `bin/stow.sh`: stow, unstow, restow, folding, XDG barriers, annotations, force, adopt, dry-run, ignore patterns, error cases, idempotency, self-stow, directory condition propagation, auto-unfold, stale fold points, `.stowignore`, report output, `-S`/`-D`/`-R` auto-discovery, ancestor fold point detection, packages with no surviving candidate, the tracked-file evict guard, --no-evict, mutual exclusion checks (90)
+  - `integration.bats` — end-to-end via `bin/stow.sh`: stow, unstow, restow, folding, XDG barriers, annotations, force, adopt, dry-run, ignore patterns, error cases, idempotency, self-stow, directory condition propagation, auto-unfold, stale fold points, `.stowignore`, report output, `-S`/`-D`/`-R` auto-discovery, ancestor fold point detection, packages with no surviving candidate, the tracked-file evict guard, --no-evict, fully ignored fold sweep, mutual exclusion checks (93)
   - `scan.bats` — recursive scanning, dotfiles, annotated filenames, spaces (8)
-  - `stow.bats` — stow/unstow operations: symlinks, annotations, conflicts, force, adopt, dry-run, auto-unfold, ancestor fold point detection, stale fold points and eviction, the tracked-file evict guard, --no-evict, non-git packages (54)
+  - `stow.bats` — stow/unstow operations: symlinks, annotations, conflicts, force, adopt, dry-run, auto-unfold, ancestor fold point detection, stale fold points and eviction, the sweep for fully filtered folds, the tracked-file evict guard, --no-evict, non-git packages (62)
   - `xdg.bats` — XDG barrier computation from environment variables (10)
 
 ### When Making Changes
