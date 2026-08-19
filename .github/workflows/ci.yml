@@ -17,31 +17,44 @@ concurrency:
 permissions:
   contents: read
 
+# A stalled apt mirror can hang an install step for hours. The Acquire
+# timeouts drop a dead connection fast, the retries pick a new one, and
+# the step timeout fails the job instead of holding the runner.
+env:
+  APT_OPTS: >-
+    -o Acquire::Retries=3
+    -o Acquire::http::Timeout=15
+    -o Acquire::https::Timeout=15
+
 jobs:
   lint:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
       - name: Install shellcheck
+        timeout-minutes: 4
         run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq shellcheck
+          sudo apt-get update -qq $APT_OPTS
+          sudo apt-get install -y -qq $APT_OPTS shellcheck
 
       - name: Run shellcheck
         run: shellcheck src/*.sh bin/*.sh conditions.d/*.sh
 
   test:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
       - name: Install bats
+        timeout-minutes: 4
         run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq bats
+          sudo apt-get update -qq $APT_OPTS
+          sudo apt-get install -y -qq $APT_OPTS bats
 
       - name: Run tests
         run: |
