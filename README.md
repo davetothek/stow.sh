@@ -453,6 +453,8 @@ Three rules keep the move safe:
 - **`--no-evict` turns the move off.** The stale fold point then stays in place with a warning that names it. Nothing moves, and the files stay visible at the target through the symlink.
 - **A package outside a git work tree never evicts.** Without git there is no way to tell package content from application state, so the fold point stays, with a warning.
 
+The check does not need a surviving file: a fold whose **whole** directory becomes ignored is found by a sweep of the package's directories, and comes apart under the same rules.
+
 `-n`/`--dry-run` reports the unfold and each move, and changes nothing.
 
 This removes the need for `mkdir -p` calls in a bootstrap script whose only purpose is to pre-create a directory so it cannot fold.

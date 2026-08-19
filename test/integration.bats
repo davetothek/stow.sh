@@ -750,6 +750,95 @@ teardown() {
     [ -L "$TARGET_DIR/.config/app/config.toml" ]
 }
 
+@test "integration: a fold whose whole directory becomes ignored is unfolded" {
+    local pkg="$SOURCE_DIR/pkg"
+    mkdir -p "$pkg/dot-app"
+    git -C "$pkg" init -q
+    : > "$pkg/.gitignore"
+    printf 'a\n' > "$pkg/dot-app/a.conf"
+    git -C "$pkg" add .gitignore
+    git -C "$pkg" -c user.email=t@t -c user.name=t commit -qm init
+
+    cd "$pkg"
+    # Nothing is ignored yet, so the directory folds
+    run "$STOW_SH" -g --no-xdg --dotfiles -d "$SOURCE_DIR" -t "$TARGET_DIR" -S pkg
+    [ "$status" -eq 0 ]
+    [ -L "$TARGET_DIR/.app" ]
+
+    # Ignore the whole directory, as #5 describes
+    printf 'dot-app/\n' > "$pkg/.gitignore"
+
+    # The run resolves no target below the fold point, and the sweep still
+    # finds it: unfold, and move the untracked file to the target
+    run "$STOW_SH" -g --no-xdg --dotfiles -d "$SOURCE_DIR" -t "$TARGET_DIR" -S pkg
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"unfold"* ]]
+
+    [ -d "$TARGET_DIR/.app" ] && [ ! -L "$TARGET_DIR/.app" ]
+    [ -f "$TARGET_DIR/.app/a.conf" ] && [ ! -L "$TARGET_DIR/.app/a.conf" ]
+    [ "$(cat "$TARGET_DIR/.app/a.conf")" = "a" ]
+    [ ! -e "$pkg/dot-app/a.conf" ]
+
+    # git clean no longer reaches the file
+    run git -C "$pkg" clean -xdn
+    [ "$status" -eq 0 ]
+    [[ "$output" != *"a.conf"* ]]
+
+    # A third run has nothing left to do
+    run "$STOW_SH" -g --no-xdg --dotfiles -d "$SOURCE_DIR" -t "$TARGET_DIR" -S pkg
+    [ "$status" -eq 0 ]
+    [[ "$output" != *"unfold"* ]]
+    [ "$(cat "$TARGET_DIR/.app/a.conf")" = "a" ]
+}
+
+@test "integration: dry-run reports a fully ignored stale fold" {
+    local pkg="$SOURCE_DIR/pkg"
+    mkdir -p "$pkg/dot-app"
+    git -C "$pkg" init -q
+    : > "$pkg/.gitignore"
+    printf 'a\n' > "$pkg/dot-app/a.conf"
+    git -C "$pkg" add .gitignore
+    git -C "$pkg" -c user.email=t@t -c user.name=t commit -qm init
+
+    cd "$pkg"
+    run "$STOW_SH" -g --no-xdg --dotfiles -d "$SOURCE_DIR" -t "$TARGET_DIR" -S pkg
+    [ "$status" -eq 0 ]
+    printf 'dot-app/\n' > "$pkg/.gitignore"
+
+    run "$STOW_SH" -g --no-xdg --dotfiles -n -d "$SOURCE_DIR" -t "$TARGET_DIR" -S pkg
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"WOULD unfold"* ]]
+    [[ "$output" == *"WOULD evict"* ]]
+    [ -L "$TARGET_DIR/.app" ]
+    [ -f "$pkg/dot-app/a.conf" ]
+}
+
+@test "integration: a stowignored tracked directory aborts atomically" {
+    local pkg="$SOURCE_DIR/pkg"
+    mkdir -p "$pkg/.config/nvim"
+    git -C "$pkg" init -q
+    : > "$pkg/.gitignore"
+    echo "init" > "$pkg/.config/nvim/init.lua"
+    echo "rc" > "$pkg/.bashrc"
+    git -C "$pkg" add -A
+    git -C "$pkg" -c user.email=t@t -c user.name=t commit -qm init
+
+    cd "$pkg"
+    run "$STOW_SH" -g --no-xdg -d "$SOURCE_DIR" -t "$TARGET_DIR" -S pkg
+    [ "$status" -eq 0 ]
+    [ -L "$TARGET_DIR/.config" ]
+
+    # Stop managing the directory. Its files are tracked, so eviction
+    # refuses, and the pre-flight aborts with zero changes.
+    printf '.config\n' > "$pkg/.stowignore"
+
+    run "$STOW_SH" -g --no-xdg -d "$SOURCE_DIR" -t "$TARGET_DIR" -S pkg
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"Refusing to evict"* ]]
+    [ -L "$TARGET_DIR/.config" ]
+    [ -f "$pkg/.config/nvim/init.lua" ]
+}
+
 @test "integration: a transient filter flag cannot evict tracked files" {
     local pkg="$SOURCE_DIR/pkg"
     mkdir -p "$pkg/.config/app"
