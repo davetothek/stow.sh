@@ -750,6 +750,54 @@ teardown() {
     [ -L "$TARGET_DIR/.config/app/config.toml" ]
 }
 
+@test "integration: a transient filter flag cannot evict tracked files" {
+    local pkg="$SOURCE_DIR/pkg"
+    mkdir -p "$pkg/.config/app"
+    git -C "$pkg" init -q
+    : > "$pkg/.gitignore"
+    echo "cfg" > "$pkg/.config/app/config.toml"
+    echo "doc" > "$pkg/.config/app/notes.md"
+    git -C "$pkg" add -A
+    git -C "$pkg" -c user.email=t@t -c user.name=t commit -qm init
+
+    cd "$pkg"
+    run "$STOW_SH" -g --no-xdg -d "$SOURCE_DIR" -t "$TARGET_DIR" -S pkg
+    [ "$status" -eq 0 ]
+    [ -L "$TARGET_DIR/.config" ]
+
+    # A one-off glob filter drops a tracked file from the plan. The fold
+    # looks stale, but the move would pull repository content out of the
+    # repository. The pre-flight aborts with zero changes.
+    run "$STOW_SH" -g --no-xdg -I '*.md' -d "$SOURCE_DIR" -t "$TARGET_DIR" -S pkg
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"Refusing to evict"* ]]
+
+    # Atomic: the fold point and the tracked file are untouched
+    [ -L "$TARGET_DIR/.config" ]
+    [ -f "$pkg/.config/app/notes.md" ]
+}
+
+@test "integration: --no-evict keeps a stale fold and warns" {
+    local pkg="$SOURCE_DIR/pkg"
+    mkdir -p "$pkg/.config/app"
+    git -C "$pkg" init -q
+    printf '.config/app/local.conf\n' > "$pkg/.gitignore"
+    echo "cfg" > "$pkg/.config/app/config.toml"
+
+    cd "$pkg"
+    run "$STOW_SH" -g --no-xdg -d "$SOURCE_DIR" -t "$TARGET_DIR" -S pkg
+    [ "$status" -eq 0 ]
+    echo "local" > "$TARGET_DIR/.config/app/local.conf"
+
+    run "$STOW_SH" -g --no-xdg --no-evict -d "$SOURCE_DIR" -t "$TARGET_DIR" -S pkg
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"Stale fold point kept"* ]]
+
+    # The fold point stays, and the file stays in the package
+    [ -L "$TARGET_DIR/.config" ]
+    [ -f "$pkg/.config/app/local.conf" ]
+}
+
 @test "integration: a fold that is still safe is left alone" {
     local pkg="$SOURCE_DIR/pkg"
     mkdir -p "$pkg/.config/app"

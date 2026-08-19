@@ -88,7 +88,7 @@ conflict handling — plus extras aimed at dotfiles:
 - Regex (`-i`) and glob (`-I`) ignore patterns on the command line
 - XDG-aware directory folding -- `XDG_*` directories stay real, their children can still fold
 - Auto-unfold -- falls back to individual symlinks when a target directory already exists
-- Stale fold points -- a fold that a later ignored file makes unsafe is unfolded on the next run
+- Stale fold points -- a fold that a later ignored file makes unsafe is unfolded on the next run (`--no-evict` opts out)
 - Pluggable condition predicates as shell functions
 - Atomic by default -- if any conflict is detected, nothing is changed (see below)
 - Pure Bash 4+, no external dependencies (GNU Stow requires Perl)
@@ -229,6 +229,9 @@ Naming:
 Conflict handling:
   -f, --force               Overwrite existing symlinks at the target
   --adopt                   Move existing target files into the package
+  --evict                   Move filtered files out of a stale fold point
+                            and into the target (default)
+  --no-evict                Keep a stale fold point in place and warn
 
 Output:
   -v, --verbose             Show more detail (repeat: -vvv)
@@ -443,6 +446,12 @@ $ stow.sh -S dotfiles
 ```
 
 The unfold moves the filtered file out of the package and into the target. This is the point of the operation: the fold pointed the application's write at the package, so the file sat inside the repository, where `git clean -xdf` removes it. After the unfold it is a plain local file at the target, and the application still finds it.
+
+Three rules keep the move safe:
+
+- **Only untracked files move.** A tracked file that drops out of the plan points at a transient filter (a one-off `-I` flag, a new `.stowignore` pattern), and a move would pull repository content out of the repository. That is an error, and the all-or-nothing pre-flight turns it into an atomic abort — zero changes.
+- **`--no-evict` turns the move off.** The stale fold point then stays in place with a warning that names it. Nothing moves, and the files stay visible at the target through the symlink.
+- **A package outside a git work tree never evicts.** Without git there is no way to tell package content from application state, so the fold point stays, with a warning.
 
 `-n`/`--dry-run` reports the unfold and each move, and changes nothing.
 

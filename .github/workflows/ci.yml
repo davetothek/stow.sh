@@ -1,12 +1,18 @@
 # SPDX-License-Identifier: MIT
 name: CI
 
-# Runs on every push and pull request so regressions are caught before a
-# release — not at tag time (see release.yml) when it is already too late.
+# Runs on every pull request and on every push to main so regressions are
+# caught before a release — not at tag time (see release.yml), when it is
+# too late.
 on:
   push:
-    branches: ["**"]
+    branches: [main]
   pull_request:
+
+# One run per branch. A new push cancels the run for the commit it replaced.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read

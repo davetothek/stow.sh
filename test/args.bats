@@ -299,6 +299,22 @@ parse_no_git() {
     [[ "$output" == *"mutually exclusive"* ]]
 }
 
+@test "parse_args: evict is on by default" {
+    stow_sh::parse_args -S pkg
+    stow_sh::is_evict
+}
+
+@test "parse_args: --no-evict disables evict mode" {
+    stow_sh::parse_args --no-evict -S pkg
+    ! stow_sh::is_evict
+}
+
+@test "parse_args: --evict and --no-evict are mutually exclusive" {
+    run stow_sh::parse_args --evict --no-evict -S pkg
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"mutually exclusive"* ]]
+}
+
 @test "parse_args: --force alone is allowed" {
     parse_no_git --force -S pkg
     [[ "$(stow_sh::get_force)" == "true" ]]

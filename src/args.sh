@@ -26,6 +26,9 @@ _stow_sh_dry_run=false
 _stow_sh_preflight=false
 _stow_sh_color_mode="auto"
 _stow_sh_adopt=false
+# Eviction moves a filtered file out of a stale fold point and into the
+# target. On by default — see stow.sh for the safety rules.
+_stow_sh_evict=true
 _stow_sh_dotfiles=false
 _stow_sh_no_folding=false
 _stow_sh_xdg_mode=true
@@ -65,6 +68,7 @@ stow_sh::is_xdg_mode() { [[ "${_stow_sh_xdg_mode:-true}" == true ]]; }
 stow_sh::is_dry_run() { [[ "${_stow_sh_dry_run:-false}" == true ]]; }
 stow_sh::is_force() { [[ "${_stow_sh_force:-false}" == true ]]; }
 stow_sh::is_adopt() { [[ "${_stow_sh_adopt:-false}" == true ]]; }
+stow_sh::is_evict() { [[ "${_stow_sh_evict:-true}" == true ]]; }
 stow_sh::is_dotfiles() { [[ "${_stow_sh_dotfiles:-false}" == true ]]; }
 stow_sh::is_preflight() { [[ "${_stow_sh_preflight:-false}" == true ]]; }
 
@@ -133,6 +137,9 @@ Conflict handling:
   -f, --force               Overwrite existing symlinks at the target
   --adopt                   Move existing target files into the source
                             package, then create the symlink
+  --evict                   Move filtered files out of a stale fold point
+                            and into the target (default)
+  --no-evict                Keep a stale fold point in place and warn
 
 Output:
   -v, --verbose             Show more detail (repeat for more: -vvv)
@@ -171,6 +178,8 @@ stow_sh::parse_args() {
     local explicit_git_flag=false
     local explicit_git_enable=false
     local explicit_git_disable=false
+    local explicit_evict_enable=false
+    local explicit_evict_disable=false
     local explicit_stow=false
     local explicit_unstow=false
     local explicit_restow=false
@@ -293,6 +302,18 @@ stow_sh::parse_args() {
                 stow_sh::log debug 2 "Enabled adopt mode"
                 shift
                 ;;
+            --evict)
+                _stow_sh_evict=true
+                explicit_evict_enable=true
+                stow_sh::log debug 2 "Enabled evict mode"
+                shift
+                ;;
+            --no-evict)
+                _stow_sh_evict=false
+                explicit_evict_disable=true
+                stow_sh::log debug 2 "Disabled evict mode"
+                shift
+                ;;
             --dotfiles)
                 _stow_sh_dotfiles=true
                 stow_sh::log debug 2 "Enabled dotfiles name translation"
@@ -336,6 +357,10 @@ stow_sh::parse_args() {
     fi
     if [[ "$explicit_git_enable" == true && "$explicit_git_disable" == true ]]; then
         stow_sh::log error "-g/--git and -G/--no-git are mutually exclusive"
+        exit 1
+    fi
+    if [[ "$explicit_evict_enable" == true && "$explicit_evict_disable" == true ]]; then
+        stow_sh::log error "--evict and --no-evict are mutually exclusive"
         exit 1
     fi
 
