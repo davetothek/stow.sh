@@ -75,14 +75,14 @@ stow.sh/
 │   ├── commit-msg           # Git hook — validates conventional commit format (install via: make hooks)
 │   └── pre-commit           # Git hook — runs shellcheck + tests before each commit
 ├── test/
-│   ├── args.bats            # Tests for args.sh (46 tests)
+│   ├── args.bats            # Tests for args.sh (49 tests)
 │   ├── conditions.bats      # Tests for conditions, annotations, sanitization, plugins (42 tests)
 │   ├── dotfiles.bats        # Tests for dotfiles.sh: dot- ↔ . translation (12 tests)
 │   ├── filter.bats          # Tests for filter.sh (37 tests)
 │   ├── fold.bats            # Tests for fold.sh: folding, barriers, exclusions (38 tests)
-│   ├── integration.bats     # End-to-end tests via bin/stow.sh, incl. atomicity + dotfiles (88 tests)
+│   ├── integration.bats     # End-to-end tests via bin/stow.sh, incl. atomicity + dotfiles (90 tests)
 │   ├── scan.bats            # Tests for scan.sh (8 tests)
-│   ├── stow.bats            # Tests for stow.sh: stow/unstow operations (51 tests)
+│   ├── stow.bats            # Tests for stow.sh: stow/unstow operations (54 tests)
 │   ├── xdg.bats             # Tests for xdg.sh: XDG barrier computation (10 tests)
 │   └── fixtures/
 │       └── paths.bats       # Fixture: realistic dotfile path list (unused)
@@ -298,6 +298,22 @@ fold pointed the write of an application at the package, so the file sits in
 the repository, where `git clean -xdf` removes it. The move puts the file at
 the target, where the application reads it, and leaves the repository clean.
 
+Eviction is on by default and gated three ways:
+
+- **Only untracked files move.** `__unfold_stale` records the tracked files
+  below the fold point (`git ls-files`) in `_stow_sh_evict_tracked`, and the
+  walk refuses a tracked entry with an error. A tracked file that drops out
+  of the plan points at a transient filter (a one-off `-I`/`-i` flag, a new
+  `.stowignore` pattern), and a move would pull repository content out of
+  the repository. The pre-flight turns the error into an atomic abort.
+- **`--no-evict` keeps the fold point** and warns. `--evict`/`--no-evict`
+  parse like `-g`/`-G` and are mutually exclusive when both are explicit.
+- **A package outside a git work tree keeps the fold point** and warns —
+  without git, package content and application state look the same.
+
+A kept fold point sets `_stow_sh_fold_kept`, and `__create_link` then treats
+the files below it as already stowed (they stay visible through the symlink).
+
 Two details keep the operation safe:
 
 - `_stow_sh_unfolded_folds` reports one unfold for each fold point. A dry-run
@@ -394,15 +410,15 @@ chore: bump version to 0.9.0
 - **Framework**: [bats-core](https://github.com/bats-core/bats-core)
 - **Run tests**: `make test` or `bats --verbose-run test/`
 - **Test location**: `test/*.bats`, fixtures in `test/fixtures/`
-- **Current coverage** (332 tests, all passing):
-  - `args.bats` — CLI argument parsing, short-flag expansion, path setup, getters, `-S`/`-D`/`-R` auto-discovery, `--dry-run` alias, mutual exclusion checks (46)
+- **Current coverage** (340 tests, all passing):
+  - `args.bats` — CLI argument parsing, short-flag expansion, path setup, getters, `-S`/`-D`/`-R` auto-discovery, `--dry-run` alias, mutual exclusion checks, evict flags (49)
   - `conditions.bats` — annotation parsing, path sanitization, condition evaluation, plugins, directory propagation (42)
   - `dotfiles.bats` — `dot-` name translation in both directions (12)
   - `filter.bats` — git-aware, regex, glob filtering, stowignore directory matching (37)
   - `fold.bats` — directory folding with annotation taint, XDG barriers, filesystem completeness, exclusion awareness, empty candidate list (38)
-  - `integration.bats` — end-to-end via `bin/stow.sh`: stow, unstow, restow, folding, XDG barriers, annotations, force, adopt, dry-run, ignore patterns, error cases, idempotency, self-stow, directory condition propagation, auto-unfold, stale fold points, `.stowignore`, report output, `-S`/`-D`/`-R` auto-discovery, ancestor fold point detection, packages with no surviving candidate, mutual exclusion checks (88)
+  - `integration.bats` — end-to-end via `bin/stow.sh`: stow, unstow, restow, folding, XDG barriers, annotations, force, adopt, dry-run, ignore patterns, error cases, idempotency, self-stow, directory condition propagation, auto-unfold, stale fold points, `.stowignore`, report output, `-S`/`-D`/`-R` auto-discovery, ancestor fold point detection, packages with no surviving candidate, the tracked-file evict guard, --no-evict, mutual exclusion checks (90)
   - `scan.bats` — recursive scanning, dotfiles, annotated filenames, spaces (8)
-  - `stow.bats` — stow/unstow operations: symlinks, annotations, conflicts, force, adopt, dry-run, auto-unfold, ancestor fold point detection, stale fold points and eviction (51)
+  - `stow.bats` — stow/unstow operations: symlinks, annotations, conflicts, force, adopt, dry-run, auto-unfold, ancestor fold point detection, stale fold points and eviction, the tracked-file evict guard, --no-evict, non-git packages (54)
   - `xdg.bats` — XDG barrier computation from environment variables (10)
 
 ### When Making Changes

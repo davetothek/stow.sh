@@ -30,10 +30,21 @@ declare -gA _stow_sh_readlink_cache=()
 declare -gA _stow_sh_planned_links=()
 declare -gA _stow_sh_planned_under=()
 
-# Stale fold points that this pass handled. One fold point can cover many
-# files, and a dry-run pass does not remove it. Each file below it therefore
-# finds it again. This set keeps the report to one line for each fold point.
+# Stale fold points that this pass handled, mapped to their outcome:
+# "unfolded", "kept", or "error". One fold point can cover many files, and a
+# dry-run pass does not remove it. Each file below it therefore finds it
+# again. The map keeps the report to one line and repeats the outcome.
 declare -gA _stow_sh_unfolded_folds=()
+
+# Files that git tracks below the current stale fold point, and their parent
+# directories. __unfold_stale fills the set, and __unfold_stale_walk reads
+# it. Eviction refuses a tracked file — see __unfold_stale.
+declare -gA _stow_sh_evict_tracked=()
+
+# True after __unfold_stale keeps a stale fold point in place, because
+# eviction is off or the package is outside git. The caller then treats the
+# files below the fold point as already stowed.
+declare -g _stow_sh_fold_kept=false
 
 # True after an operation moves a file into or out of a package directory.
 # main.sh then drops the cached resolution of that package.
@@ -253,25 +264,70 @@ stow_sh::unstow_package() {
 stow_sh::__unfold_stale() {
     local fold_link="$1"
     local source_dir="$2"
+    _stow_sh_fold_kept=false
 
     # Each planned file below the fold point finds it again, and a dry-run
-    # pass keeps it. Report and walk the fold point one time for each pass.
-    [[ -n "${_stow_sh_unfolded_folds[$fold_link]+set}" ]] && return 0
-    _stow_sh_unfolded_folds["$fold_link"]=1
+    # pass keeps it. Act one time for each pass, and repeat the outcome.
+    if [[ -n "${_stow_sh_unfolded_folds[$fold_link]+set}" ]]; then
+        case "${_stow_sh_unfolded_folds[$fold_link]}" in
+            kept) _stow_sh_fold_kept=true; return 0 ;;
+            error) return 1 ;;
+            *) return 0 ;;
+        esac
+    fi
 
+    # --no-evict: keep the fold point and tell the user what it hides. The
+    # files stay visible at the target through the symlink, so nothing
+    # breaks, but they live in the package until the user acts.
+    if ! stow_sh::is_evict; then
+        _stow_sh_unfolded_folds["$fold_link"]="kept"
+        _stow_sh_fold_kept=true
+        stow_sh::is_preflight || stow_sh::log warn "Stale fold point kept (--no-evict): '$fold_link' serves filtered files from inside the package. Re-run with --evict to unfold it, or with -n --evict to preview."
+        return 0
+    fi
+
+    # Eviction moves only files that git does not track. A package outside a
+    # git work tree gives no way to tell package content from application
+    # state, so keep the fold point and warn.
+    if ! git -C "$source_dir" rev-parse --is-inside-work-tree &> /dev/null; then
+        _stow_sh_unfolded_folds["$fold_link"]="kept"
+        _stow_sh_fold_kept=true
+        stow_sh::is_preflight || stow_sh::log warn "Stale fold point kept: '$fold_link' — the package is outside a git work tree, so stow.sh cannot tell package content from application state. Unfold it manually if intended."
+        return 0
+    fi
+
+    # Record each tracked file below the fold point, and each parent
+    # directory of a tracked file. The walk refuses to move them.
+    _stow_sh_evict_tracked=()
+    local _tracked
+    while IFS= read -r -d '' _tracked; do
+        _stow_sh_evict_tracked["$_tracked"]=1
+        while [[ "$_tracked" == */* ]]; do
+            _tracked="${_tracked%/*}"
+            _stow_sh_evict_tracked["$_tracked"]=1
+        done
+    done < <(git -C "$source_dir" ls-files -z 2> /dev/null)
+
+    local status=0
     if stow_sh::is_dry_run; then
         stow_sh::log debug 1 "WOULD unfold stale fold point: '$fold_link' -> '$source_dir'"
         stow_sh::report "?" "WOULD unfold $fold_link (stale fold point)"
-        stow_sh::__unfold_stale_walk "$source_dir" "$fold_link"
-        return $?
+        stow_sh::__unfold_stale_walk "$source_dir" "$fold_link" "" || status=1
+    else
+        stow_sh::log debug 1 "Unfolding stale fold point: '$fold_link' -> '$source_dir'"
+        stow_sh::report "+" "unfold $fold_link (stale fold point)"
+        rm "$fold_link"
+        unset "_stow_sh_readlink_cache[$fold_link]"
+        mkdir "$fold_link"
+        stow_sh::__unfold_stale_walk "$source_dir" "$fold_link" "" || status=1
     fi
 
-    stow_sh::log debug 1 "Unfolding stale fold point: '$fold_link' -> '$source_dir'"
-    stow_sh::report "+" "unfold $fold_link (stale fold point)"
-    rm "$fold_link"
-    unset "_stow_sh_readlink_cache[$fold_link]"
-    mkdir "$fold_link"
-    stow_sh::__unfold_stale_walk "$source_dir" "$fold_link"
+    if [[ $status -ne 0 ]]; then
+        _stow_sh_unfolded_folds["$fold_link"]="error"
+        return 1
+    fi
+    _stow_sh_unfolded_folds["$fold_link"]="unfolded"
+    return 0
 }
 
 # Walk the source directory of a stale fold point. Move each entry that the
@@ -285,20 +341,31 @@ stow_sh::__unfold_stale() {
 #   * Neither case applies. This run links nothing in the entry, so the
 #     entry moves to the target.
 #
-# Usage: stow_sh::__unfold_stale_walk source_dir dest_dir
-# Returns: 0 on success, 1 if an eviction destination is occupied
+# A move needs one more permission: git must not track the entry. A tracked
+# file that drops out of the plan points at a transient filter — a one-off
+# -I or -i flag, or a new .stowignore pattern — and a move would pull
+# repository content out of the repository. That is an error, and the
+# pre-flight turns it into an atomic abort. An untracked file is the
+# application state that #4 describes, and it moves.
+#
+# Usage: stow_sh::__unfold_stale_walk source_dir dest_dir rel_prefix
+#   rel_prefix — path of source_dir relative to the fold point's source,
+#                or "" at the fold point itself. Keys _stow_sh_evict_tracked.
+# Returns: 0 on success, 1 on a tracked entry or an occupied destination
 stow_sh::__unfold_stale_walk() {
     local source_dir="$1"
     local dest_dir="$2"
+    local rel_prefix="$3"
 
     local had_error=false
-    local entry name dest
+    local entry name dest rel
     for entry in "$source_dir"/* "$source_dir"/.*; do
         [[ ! -e "$entry" && ! -L "$entry" ]] && continue
         name="${entry##*/}"
         [[ "$name" == "." || "$name" == ".." ]] && continue
         stow_sh::__dotfiles_translate_var "$name"
         dest="$dest_dir/$_stow_sh_dtrans"
+        rel="${rel_prefix}${rel_prefix:+/}$name"
 
         [[ -n "${_stow_sh_planned_links[$dest]+set}" ]] && continue
 
@@ -309,8 +376,14 @@ stow_sh::__unfold_stale_walk() {
                 else
                     mkdir -p "$dest"
                 fi
-                stow_sh::__unfold_stale_walk "$entry" "$dest" || had_error=true
+                stow_sh::__unfold_stale_walk "$entry" "$dest" "$rel" || had_error=true
             fi
+            continue
+        fi
+
+        if [[ -n "${_stow_sh_evict_tracked[$rel]+set}" ]]; then
+            stow_sh::log error "Refusing to evict '$entry': git tracks it. The run's filters exclude repository content — drop the filter, or move the file manually."
+            had_error=true
             continue
         fi
 
@@ -397,6 +470,11 @@ stow_sh::__create_link() {
                     return 0
                 fi
                 stow_sh::__unfold_stale "$_check_dir" "$_ancestor_target" || return 1
+                # A kept fold point still serves this file at the target.
+                if [[ "$_stow_sh_fold_kept" == true ]]; then
+                    stow_sh::__log_already_stowed "'$link_path' (via kept stale fold point at '$_check_dir')"
+                    return 0
+                fi
                 _stale_unfold=true
             else
                 _symlink_ancestor=true

@@ -712,6 +712,7 @@ teardown() {
 
 @test "stow_package unfolds a stale fold point and evicts unplanned files" {
     mkdir -p "$PKG_DIR/.appdir"
+    git -C "$PKG_DIR" init -q
     echo "cfg" > "$PKG_DIR/.appdir/config.toml"
     echo "local" > "$PKG_DIR/.appdir/local.conf"
 
@@ -735,6 +736,7 @@ teardown() {
 
 @test "stow_package stale unfold recurses into subdirectories" {
     mkdir -p "$PKG_DIR/.appdir/sub"
+    git -C "$PKG_DIR" init -q
     echo "cfg" > "$PKG_DIR/.appdir/sub/config.toml"
     echo "state" > "$PKG_DIR/.appdir/sub/state.db"
     echo "log" > "$PKG_DIR/.appdir/app.log"
@@ -758,6 +760,7 @@ teardown() {
 
 @test "stow_package stale unfold evicts an unplanned directory whole" {
     mkdir -p "$PKG_DIR/.appdir/cache/inner"
+    git -C "$PKG_DIR" init -q
     echo "cfg" > "$PKG_DIR/.appdir/config.toml"
     echo "blob" > "$PKG_DIR/.appdir/cache/inner/blob.bin"
 
@@ -774,6 +777,7 @@ teardown() {
 
 @test "stow_package stale unfold keeps a planned fold point inside it" {
     mkdir -p "$PKG_DIR/.appdir/sub"
+    git -C "$PKG_DIR" init -q
     echo "cfg" > "$PKG_DIR/.appdir/sub/config.toml"
     echo "local" > "$PKG_DIR/.appdir/local.conf"
 
@@ -793,6 +797,7 @@ teardown() {
 
 @test "stow_package stale unfold reports one unfold for many files" {
     mkdir -p "$PKG_DIR/.appdir"
+    git -C "$PKG_DIR" init -q
     echo "a" > "$PKG_DIR/.appdir/a.toml"
     echo "b" > "$PKG_DIR/.appdir/b.toml"
     echo "local" > "$PKG_DIR/.appdir/local.conf"
@@ -811,6 +816,7 @@ teardown() {
 @test "stow_package --dry-run reports a stale unfold without touching anything" {
     _stow_sh_dry_run=true
     mkdir -p "$PKG_DIR/.appdir"
+    git -C "$PKG_DIR" init -q
     echo "cfg" > "$PKG_DIR/.appdir/config.toml"
     echo "local" > "$PKG_DIR/.appdir/local.conf"
 
@@ -829,6 +835,7 @@ teardown() {
 @test "stow_package stale unfold translates dot- names under --dotfiles" {
     _stow_sh_dotfiles=true
     mkdir -p "$PKG_DIR/dot-appdir"
+    git -C "$PKG_DIR" init -q
     echo "cfg" > "$PKG_DIR/dot-appdir/config.toml"
     echo "local" > "$PKG_DIR/dot-appdir/local.conf"
 
@@ -841,6 +848,57 @@ teardown() {
     [ -L "$TARGET_DIR/.appdir/config.toml" ]
     [ -f "$TARGET_DIR/.appdir/local.conf" ]
     [ ! -e "$PKG_DIR/dot-appdir/local.conf" ]
+}
+
+@test "stow_package stale unfold refuses to evict a tracked file" {
+    mkdir -p "$PKG_DIR/.appdir"
+    git -C "$PKG_DIR" init -q
+    echo "cfg" > "$PKG_DIR/.appdir/config.toml"
+    echo "doc" > "$PKG_DIR/.appdir/notes.md"
+    git -C "$PKG_DIR" add -A
+    git -C "$PKG_DIR" -c user.email=t@t -c user.name=t commit -qm init
+
+    ln -s "$PKG_DIR/.appdir" "$TARGET_DIR/.appdir"
+
+    # The plan excludes notes.md, but git tracks it — a transient filter,
+    # not application state. The move must not happen.
+    run stow_sh::stow_package "$PKG_DIR" "$TARGET_DIR" ".appdir/config.toml"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"Refusing to evict"* ]]
+    [ -f "$PKG_DIR/.appdir/notes.md" ]
+}
+
+@test "stow_package --no-evict keeps a stale fold point and warns" {
+    _stow_sh_evict=false
+    mkdir -p "$PKG_DIR/.appdir"
+    git -C "$PKG_DIR" init -q
+    echo "cfg" > "$PKG_DIR/.appdir/config.toml"
+    echo "local" > "$PKG_DIR/.appdir/local.conf"
+
+    ln -s "$PKG_DIR/.appdir" "$TARGET_DIR/.appdir"
+
+    run stow_sh::stow_package "$PKG_DIR" "$TARGET_DIR" ".appdir/config.toml"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"Stale fold point kept"* ]]
+
+    # Nothing moves, and the fold point stays
+    [ -L "$TARGET_DIR/.appdir" ]
+    [ -f "$PKG_DIR/.appdir/local.conf" ]
+}
+
+@test "stow_package keeps a stale fold point when the package is outside git" {
+    mkdir -p "$PKG_DIR/.appdir"
+    echo "cfg" > "$PKG_DIR/.appdir/config.toml"
+    echo "local" > "$PKG_DIR/.appdir/local.conf"
+
+    ln -s "$PKG_DIR/.appdir" "$TARGET_DIR/.appdir"
+
+    # No git work tree — stow.sh cannot classify the files, so it holds
+    run stow_sh::stow_package "$PKG_DIR" "$TARGET_DIR" ".appdir/config.toml"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"outside a git work tree"* ]]
+    [ -L "$TARGET_DIR/.appdir" ]
+    [ -f "$PKG_DIR/.appdir/local.conf" ]
 }
 
 @test "stow_package links correctly through a symlinked intermediate dir" {
