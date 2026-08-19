@@ -1,3 +1,16 @@
+## v0.19.0 (2026-08-19)
+
+### Feat
+
+- **stow**: add --[no-]evict and guard tracked files from eviction
+- **filter**: never stow the package-root .gitignore in git mode
+
+### Fix
+
+- **stow**: sweep for stale fold points with no planned link below them
+- **stow**: unfold a stale fold point and move the ignored file out
+- **main**: succeed when a package has no surviving candidate
+
 ## v0.18.0 (2026-08-14)
 
 ### Feat
